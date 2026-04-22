@@ -1,17 +1,19 @@
 {
-  "name": "virtual-virgo",
-  "type": "module",
-  "version": "0.0.1",
-  "engines": {
-    "node": ">=22.12.0"
-  },
+  "name": "eliebenchimol.com",
+  "version": "1.0.0",
+  "description": "Static photography portfolio for Elie Benchimol.",
+  "main": "build-images.js",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
-    "astro": "astro"
+    "build": "node build-images.js",
+    "build:images": "node build-images.js",
+    "serve": "python3 -m http.server 4173",
+    "serve:dist": "python3 -m http.server 4174 --directory dist"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "astro": "^6.1.6"
+    "fs-extra": "^11.3.4",
+    "sharp": "^0.34.5"
   }
 }

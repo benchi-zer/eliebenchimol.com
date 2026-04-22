@@ -1,5 +1,6 @@
 # build output
 dist/
+build/
 
 # generated types
 .astro/
@@ -19,6 +20,11 @@ pnpm-debug.log*
 
 # macOS-specific files
 .DS_Store
+.BridgeSort
+
+# local backups and snapshots
+*.tar.gz
+menus qui marchent/
 
 # jetbrains setting folder
 .idea/

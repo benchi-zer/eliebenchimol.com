@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Elie Benchimol</title>
+  <meta
+    name="description"
+    content="Elie Benchimol portfolio featuring portraits, views, and details."
+  />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="stage">
+    <aside class="sidebar">
+      <a class="brand" href="#top">Elie Benchimol</a>
+
+      <nav class="menu" aria-label="Main menu">
+        <div id="category-menu" class="category-menu" aria-label="Work categories">
+          <button class="category-item is-active" data-category="portraits" type="button">personas</button>
+          <button class="category-item" data-category="views" type="button">formes</button>
+          <button class="category-item" data-category="details" type="button">too close</button>
+        </div>
+
+        <button id="info-toggle" class="menu-item" type="button">photographer</button>
+      </nav>
+    </aside>
+
+    <main id="top" class="content">
+      <section id="work-view" class="panel">
+        <section id="gallery" class="gallery" aria-live="polite"></section>
+      </section>
+
+      <section id="info-view" class="panel is-hidden">
+        <div class="info-block">
+          <h1>Elie Benchimol</h1>
+          <p class="info-line">Photographer based in Paris.</p>
+          <p class="info-note">
+            Between clean lines and tired mornings,
+            his images move through portraits, views and details with the same taste for elegance,
+            drift, and small accidents that make things human.
+          </p>
+          <div class="info-meta">
+            <p>Available for commissions, editorials and collaborations.</p>
+            <p><a href="mailto:hello@example.com">hello@example.com</a></p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div
+    id="fullscreen-set-viewer"
+    class="fullscreen-set-viewer"
+    aria-hidden="true"
+    role="dialog"
+    aria-label="Fullscreen set view"
+  >
+    <div class="fullscreen-set-content"></div>
+  </div>
+
+  <div
+    id="high-res-image-viewer"
+    class="high-res-image-viewer"
+    aria-hidden="true"
+    role="dialog"
+    aria-label="High resolution image view"
+  >
+    <img alt="" decoding="async" />
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
