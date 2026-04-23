@@ -20,7 +20,7 @@ const {
 
 const gallery = document.getElementById("gallery");
 const brand = document.querySelector(".brand");
-const infoToggle = document.getElementById("info-toggle");
+const infoToggle = brand;
 const workView = document.getElementById("work-view");
 const infoView = document.getElementById("info-view");
 const categoryItems = document.querySelectorAll(".category-item");
@@ -180,8 +180,10 @@ function maybeAdjustTwoImageLayout(grid, images, imgElements) {
     const secondLandscape = second.naturalWidth > second.naturalHeight;
     const firstPortrait = first.naturalHeight > first.naturalWidth;
     const secondPortrait = second.naturalHeight > second.naturalWidth;
+    const bothLandscape = firstLandscape && secondLandscape;
 
     grid.classList.remove("layout-2-mixed-landscape-first", "layout-2-mixed-landscape-second");
+    grid.classList.toggle("layout-2-landscape", bothLandscape);
 
     if (firstLandscape && secondPortrait) {
       grid.classList.add("layout-2-mixed-landscape-first");
@@ -1032,6 +1034,7 @@ function handleResize() {
 
 function setMode(mode) {
   const isWork = mode === "work";
+  brand.textContent = isWork ? "Elie Benchimol" : "photos";
   infoToggle.classList.toggle("is-active", !isWork);
   workView.classList.toggle("is-hidden", !isWork);
   infoView.classList.toggle("is-hidden", isWork);
@@ -1561,6 +1564,7 @@ layoutReset?.addEventListener("click", () => {
 
   resetCurrentLayoutEdits();
 });
+
 layoutCopy?.addEventListener("click", copyLayoutEdits);
 
 gallery.addEventListener("pointerdown", beginLayoutDrag);
@@ -1571,14 +1575,6 @@ fullscreenSetViewer.addEventListener("pointerdown", beginLayoutDrag);
 fullscreenSetViewer.addEventListener("pointermove", moveLayoutDrag);
 fullscreenSetViewer.addEventListener("pointerup", endLayoutDrag);
 fullscreenSetViewer.addEventListener("pointercancel", endLayoutDrag);
-
-infoToggle.addEventListener("click", () => {
-  if (fullscreenSetActive) {
-    closeFullscreenSet();
-  }
-
-  setMode("info");
-});
 
 fullscreenSetViewer.addEventListener("click", (event) => {
   if (layoutEditorActive) return;
@@ -1683,33 +1679,6 @@ brand?.addEventListener("click", (event) => {
   setMode(isInfoMode ? "work" : "info");
 });
 
-workView.addEventListener(
-  "wheel",
-  (event) => {
-    if (workView.classList.contains("is-hidden")) return;
-    if (Math.abs(event.deltaX) < 4 && Math.abs(event.deltaY) < 4) return;
-
-    event.preventDefault();
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    if (loopSheetFromEdge(delta)) return;
-
-    gallery.scrollBy({ left: delta, behavior: "auto" });
-  },
-  { passive: false }
-);
-
-gallery.addEventListener("scroll", () => {
-  if (categorySyncFrame) return;
-
-  categorySyncFrame = window.requestAnimationFrame(() => {
-    categorySyncFrame = 0;
-    syncCategoryFromScroll();
-    normalizeCloneScroll();
-  });
-});
-
-window.addEventListener("resize", handleResize);
-
 document.addEventListener("keydown", (event) => {
   const handledOverlayKeys = new Set([
     "Escape",
@@ -1811,6 +1780,33 @@ document.addEventListener("keydown", (event) => {
     stepCategory(-1);
   }
 });
+
+workView.addEventListener(
+  "wheel",
+  (event) => {
+    if (workView.classList.contains("is-hidden")) return;
+    if (Math.abs(event.deltaX) < 4 && Math.abs(event.deltaY) < 4) return;
+
+    event.preventDefault();
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (loopSheetFromEdge(delta)) return;
+
+    gallery.scrollBy({ left: delta, behavior: "auto" });
+  },
+  { passive: false }
+);
+
+gallery.addEventListener("scroll", () => {
+  if (categorySyncFrame) return;
+
+  categorySyncFrame = window.requestAnimationFrame(() => {
+    categorySyncFrame = 0;
+    syncCategoryFromScroll();
+    normalizeCloneScroll();
+  });
+});
+
+window.addEventListener("resize", handleResize);
 
 renderCurrentSet();
 setMode("work");

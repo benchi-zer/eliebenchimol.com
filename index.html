@@ -19,18 +19,27 @@
 <body>
   <div class="stage">
     <aside class="sidebar">
-      <a class="brand" href="#top">Elie Benchimol</a>
-
       <nav class="menu" aria-label="Main menu">
         <div id="category-menu" class="category-menu" aria-label="Work categories">
           <button class="category-item is-active" data-category="portraits" type="button">personas</button>
           <button class="category-item" data-category="views" type="button">formes</button>
           <button class="category-item" data-category="details" type="button">too close</button>
         </div>
-
-        <button id="info-toggle" class="menu-item" type="button">photographer</button>
       </nav>
     </aside>
+
+    <button class="brand" type="button">Elie Benchimol</button>
+
+    <div class="layout-tools" aria-label="Layout tools">
+      <button id="layout-edit-toggle" class="layout-tool" type="button">edit</button>
+      <button id="layout-target-toggle" class="layout-tool" type="button">set</button>
+      <label class="layout-size-control">
+        <span>size</span>
+        <input id="layout-size" type="range" min="0" max="100" value="50" />
+      </label>
+      <button id="layout-reset" class="layout-tool" type="button">reset</button>
+      <button id="layout-copy" class="layout-tool" type="button">copy</button>
+    </div>
 
     <main id="top" class="content">
       <section id="work-view" class="panel">
@@ -39,32 +48,54 @@
 
       <section id="info-view" class="panel is-hidden">
         <div class="info-block">
-          <h1>Elie Benchimol</h1>
-          <p class="info-line">Photographer based in Paris.</p>
-          <p class="info-note">
-            I privilege the spontaneity of the photographic gesture over pure technique.
-            I often feel I photograph in order to bear witness to what I am living.
-            If I had been a musician, I would play. I am a photographer, so I capture.
-            It is not really a choice. It is something that imposes itself.
-          </p>
-          <div class="info-meta">
-            <p>Available for commissions, editorials and collaborations.</p>
-            <p>Thanks to Mohamed Keita - <a href="https://www.mohamedkeita.it/" target="_blank" rel="noreferrer">mohamedkeita.it</a></p>
+          <div class="info-header">
+            <h1>Elie Benchimol</h1>
+            <p class="info-line">Paris.</p>
+          </div>
+          <div class="info-copy">
+            <p class="info-note">
+              La photographie est mon seul outil pour raconter.
+            </p>
+            <p class="info-note">
+              C’est immédiat.
+              La lumière se fixe en une fraction de seconde.
+            </p>
+            <p class="info-note">
+              L'appareil photo est petit.
+              Il est dans ma poche.
+              Il donne un grand pouvoir.
+              Mes jambes font le reste.
+            </p>
+            <p class="info-note">
+              L’argentique ramène à l’enfance.
+              Il limite les prises de vue.
+              Chaque photo est le fruit d’un geste fort.
+              Je cherche le mouvement.
+              La technique passe au second plan.
+            </p>
+            <p class="info-note">
+              Ce site accompagne ma première exposition, qui clôture un cycle autodidacte de dix
+              ans à regarder le réel.
+            </p>
+            <p class="info-note">
+              J’aurais aimé montrer les images que je n’ai pas réussi à prendre.
+              Je montre celles que j’ai pu capturer.
+            </p>
+            <p class="info-note">
+              Expo en 2026, lieu et dates à venir.
+            </p>
+            <div class="info-meta">
+              <p>
+                Merci à Mohamed Keita -
+                <a href="https://www.mohamedkeita.it/" target="_blank" rel="noreferrer">mohamedkeita.it</a>
+                pour son aide précieuse et son temps, dans la sélection et la curation des photos.
+                Merci à Alexandra Bui pour cet appareil photo.
+              </p>
+            </div>
           </div>
         </div>
       </section>
     </main>
-  </div>
-
-  <div class="layout-tools" aria-label="Layout tools">
-    <button id="layout-edit-toggle" class="layout-tool" type="button">edit</button>
-    <button id="layout-target-toggle" class="layout-tool" type="button">set</button>
-    <label class="layout-size-control" for="layout-size">
-      size
-      <input id="layout-size" type="range" min="0" max="100" step="1" value="50" />
-    </label>
-    <button id="layout-reset" class="layout-tool" type="button">reset</button>
-    <button id="layout-copy" class="layout-tool" type="button">copy</button>
   </div>
 
   <div
