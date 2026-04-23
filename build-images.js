@@ -6,10 +6,13 @@ const sourceRoot = path.join(__dirname, "images");
 const outputRoot = path.join(__dirname, "build", "previews");
 const gridOutputRoot = path.join(outputRoot, "grid");
 const setOutputRoot = path.join(outputRoot, "sets");
+const highResOutputRoot = path.join(outputRoot, "highres");
+const setVariantManifestPath = path.join(outputRoot, "set-variant-manifest.js");
 const distRoot = path.join(__dirname, "dist");
-const outputWidths = [800];
+const previewWidths = [480, 960];
+const highResWidths = [2000];
 const webpQuality = 82;
-const staticFiles = ["index.html", "style.css", "script.js"];
+const staticFiles = ["index.html", "style.css", "script.js", "portfolio-data.js"];
 const buildScriptPath = __filename;
 
 const supportedExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"]);
@@ -49,8 +52,13 @@ async function buildPreview(sourcePath, options = {}) {
   const parsed = path.parse(relativePath);
   const outputDir = path.join(options.outputRoot, parsed.dir);
   const sourceStat = await fs.stat(sourcePath);
-  const metadata = await sharp(sourcePath).rotate().metadata();
-  const shouldRotateToLandscape = options.rotatePortraits && metadata.height > metadata.width;
+  const metadata = typeof options.isPortrait === "boolean"
+    ? null
+    : await sharp(sourcePath).rotate().metadata();
+  const isPortrait = typeof options.isPortrait === "boolean"
+    ? options.isPortrait
+    : metadata.height > metadata.width;
+  const shouldRotateToLandscape = options.rotatePortraits && isPortrait;
   const buildScriptStat = await fs.stat(buildScriptPath);
   const freshAfter = shouldRotateToLandscape
     ? Math.max(sourceStat.mtimeMs, buildScriptStat.mtimeMs)
@@ -58,12 +66,12 @@ async function buildPreview(sourcePath, options = {}) {
 
   await fs.ensureDir(outputDir);
 
-  for (const width of outputWidths) {
+  for (const width of options.widths || previewWidths) {
     const variants = [
       {
         filePath: path.join(outputDir, `${parsed.name}-${width}.webp`),
         format: "webp",
-        quality: webpQuality
+        quality: options.quality || webpQuality
       }
     ];
 
@@ -104,22 +112,42 @@ async function main() {
   }
 
   const images = await collectImages(sourceRoot);
+  const setVariantPaths = [];
 
   await fs.emptyDir(outputRoot);
 
   for (const image of images) {
-    const relativeImagePath = path.relative(sourceRoot, image);
-    const isDetailsImage = relativeImagePath.split(path.sep)[0] === "details";
+    const relativeImagePath = path.relative(sourceRoot, image).split(path.sep).join("/");
+    const runtimePath = `images/${relativeImagePath}`;
+    const metadata = await sharp(image).rotate().metadata();
+    const isPortrait = metadata.height > metadata.width;
 
     await buildPreview(image, {
       outputRoot: gridOutputRoot,
-      rotatePortraits: true
+      rotatePortraits: true,
+      isPortrait
     });
+    if (isPortrait) {
+      await buildPreview(image, {
+        outputRoot: setOutputRoot,
+        rotatePortraits: false,
+        isPortrait
+      });
+      setVariantPaths.push(runtimePath);
+    }
     await buildPreview(image, {
-      outputRoot: setOutputRoot,
-      rotatePortraits: isDetailsImage
+      outputRoot: highResOutputRoot,
+      rotatePortraits: false,
+      widths: highResWidths,
+      isPortrait,
+      quality: 82
     });
   }
+
+  await fs.writeFile(
+    setVariantManifestPath,
+    `window.__SET_VARIANT_PATHS = ${JSON.stringify(setVariantPaths)};\n`
+  );
 
   await buildDist();
 
