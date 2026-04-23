@@ -24,11 +24,6 @@ const infoToggle = brand;
 const workView = document.getElementById("work-view");
 const infoView = document.getElementById("info-view");
 const categoryItems = document.querySelectorAll(".category-item");
-const layoutEditToggle = document.getElementById("layout-edit-toggle");
-const layoutTargetToggle = document.getElementById("layout-target-toggle");
-const layoutSize = document.getElementById("layout-size");
-const layoutReset = document.getElementById("layout-reset");
-const layoutCopy = document.getElementById("layout-copy");
 const fullscreenSetViewer = document.getElementById("fullscreen-set-viewer");
 const fullscreenSetContent = fullscreenSetViewer.querySelector(".fullscreen-set-content");
 const fullscreenNavPrev = document.getElementById("fullscreen-nav-prev");
@@ -39,8 +34,10 @@ const highResImage = highResImageViewer.querySelector("img");
 const highResNavPrev = document.getElementById("high-res-nav-prev");
 const highResNavNext = document.getElementById("high-res-nav-next");
 const highResClose = document.getElementById("high-res-close");
+const mobileProgressFill = document.querySelector(".mobile-progress-fill");
 
 let currentCategory = "portraits";
+let currentMobileSetKey = "SET1";
 let wheelLock = false;
 let categorySyncFrame = 0;
 let resizeFrame = 0;
@@ -52,11 +49,10 @@ let fullscreenSetCategory = "portraits";
 let fullscreenSetKey = "SET1";
 let highResImageActive = false;
 let highResImageIndex = 0;
-let layoutEditorActive = false;
-let layoutTarget = "set";
-let activeLayoutDrag = null;
-let selectedLayoutElement = null;
 let contactSheetObserver = null;
+let mobileSwipeStart = null;
+const MOBILE_LAYOUT_QUERY = window.matchMedia("(max-width: 760px)");
+let mobileLayoutActive = MOBILE_LAYOUT_QUERY.matches;
 const PREVIEW_CACHE_BUST = "20260423-2";
 const HIGH_RES_PREVIEW_WIDTH = 2000;
 const PREVIEW_WIDTHS = [480, 960];
@@ -127,26 +123,49 @@ function setPercentPositionVars(node, xVar, yVar, x, y) {
   return { x: nextX, y: nextY };
 }
 
-function layoutScaleRangeForSelection() {
-  const selectedIsFullscreen = selectedLayoutElement?.classList.contains("fullscreen-editable-frame");
-  return selectedIsFullscreen ? SETVIEW_LAYOUT_SCALE_RANGE : GRID_LAYOUT_SCALE_RANGE;
-}
-
-function scaleToSliderValue(scale, range) {
-  const normalized = (Number(scale) - range.min) / (range.max - range.min);
-  return String(Math.round(clamp(normalized, 0, 1) * 100));
-}
-
-function sliderValueToScale(value, range) {
-  const normalized = clamp(Number(value) / 100, 0, 1);
-  return range.min + normalized * (range.max - range.min);
-}
-
 function layoutClassForSet(images) {
   if (images.length === 2) return "layout-2";
   if (images.length === 3) return "layout-3";
   if (images.length === 5) return "layout-5";
   return "layout-4";
+}
+
+function isMobileLayout() {
+  return mobileLayoutActive;
+}
+
+function syncResponsiveLayoutMode() {
+  const next = MOBILE_LAYOUT_QUERY.matches;
+  const changed = next !== mobileLayoutActive;
+  mobileLayoutActive = next;
+  document.body.classList.toggle("mobile-layout", mobileLayoutActive);
+  return changed;
+}
+
+function sheetScrollPosition(sheet) {
+  return isMobileLayout() ? sheet.offsetTop : sheet.offsetLeft;
+}
+
+function galleryScrollPosition() {
+  return isMobileLayout() ? gallery.scrollTop : gallery.scrollLeft;
+}
+
+function scrollGalleryTo(position, behavior = "smooth") {
+  if (!gallery) return;
+
+  gallery.scrollTo(
+    isMobileLayout()
+      ? { top: position, behavior }
+      : { left: position, behavior }
+  );
+}
+
+function galleryViewSize() {
+  return isMobileLayout() ? gallery.clientHeight : gallery.clientWidth;
+}
+
+function sheetViewSize(sheet) {
+  return isMobileLayout() ? sheet.offsetHeight : sheet.offsetWidth;
 }
 
 function maybePromoteToTriptych(grid, images, imgElements) {
@@ -222,6 +241,28 @@ function syncCategoryMenu() {
       entry.removeAttribute("aria-current");
     }
   });
+
+  syncMobileProgress();
+}
+
+function syncMobileProgress() {
+  if (!mobileProgressFill) return;
+
+  if (!isMobileLayout() || workView.classList.contains("is-hidden")) {
+    mobileProgressFill.style.transform = "scaleX(0)";
+    return;
+  }
+
+  const setKeys = orderedSetKeys(currentCategory);
+  if (!setKeys.length) {
+    mobileProgressFill.style.transform = "scaleX(0)";
+    return;
+  }
+
+  const currentIndex = Math.max(0, setKeys.indexOf(currentMobileSetKey));
+  const progress = (currentIndex + 1) / setKeys.length;
+  mobileProgressFill.style.transform = `scaleX(${Math.max(0.02, progress)})`;
+  mobileProgressFill.dataset.label = `${currentIndex + 1}/${setKeys.length}`;
 }
 
 function createContactSheet(category, options = {}) {
@@ -349,7 +390,6 @@ function createFreeContactFrame({ category, setKey, src, imageIndex, setIndex, s
     setHoveredSet(sheet, setKey);
   });
   item.addEventListener("click", () => {
-    if (layoutEditorActive) return;
     openFullscreenSet(category, setKey);
   });
 
@@ -450,7 +490,6 @@ function createContactSet({ category, setKey, images, chunk, chunkIndex, rowInde
     setHoveredSet(sheet, setKey);
   });
   setGroup.addEventListener("click", () => {
-    if (layoutEditorActive) return;
     openFullscreenSet(category, setKey);
   });
 
@@ -475,7 +514,6 @@ function createContactSet({ category, setKey, images, chunk, chunkIndex, rowInde
       setHoveredSet(sheet, setKey);
     });
     item.addEventListener("click", () => {
-      if (layoutEditorActive) return;
       openFullscreenSet(category, setKey);
     });
 
@@ -533,7 +571,7 @@ function observeContactSheets() {
     });
   }, {
     root: gallery,
-    rootMargin: "0px 120% 0px 120%",
+    rootMargin: isMobileLayout() ? "120% 0px 120% 0px" : "0px 120% 0px 120%",
     threshold: 0.01
   });
 
@@ -544,17 +582,40 @@ function observeContactSheets() {
 
 function renderCurrentSet() {
   gallery.innerHTML = "";
-  gallery.className = "gallery contact-sheets";
+  gallery.className = isMobileLayout()
+    ? "gallery mobile-slides mobile-layout"
+    : "gallery contact-sheets";
 
-  const categories = orderedCategories();
-  gallery.appendChild(createContactSheet(categories[categories.length - 1], { clone: true, hydrate: false }));
-  categories.forEach((category) => {
-    gallery.appendChild(createContactSheet(category, { hydrate: category === currentCategory }));
-  });
-  gallery.appendChild(createContactSheet(categories[0], { clone: true, hydrate: false }));
+  if (isMobileLayout()) {
+    const categories = orderedCategories();
+    const category = categories.includes(currentCategory) ? currentCategory : categories[0];
+    const setKeys = orderedSetKeys(category);
+
+    if (!setKeys.includes(currentMobileSetKey)) {
+      currentMobileSetKey = setKeys[0] || "";
+    }
+
+    if (!category || !currentMobileSetKey) return;
+
+    syncCategoryMenu();
+    gallery.appendChild(createMobileSlide(category, currentMobileSetKey));
+    syncCategoryState();
+    return;
+  } else {
+    const categories = orderedCategories();
+    gallery.appendChild(createContactSheet(categories[categories.length - 1], { clone: true, hydrate: false }));
+    categories.forEach((category) => {
+      gallery.appendChild(createContactSheet(category, { hydrate: category === currentCategory }));
+    });
+    gallery.appendChild(createContactSheet(categories[0], { clone: true, hydrate: false }));
+  }
 
   syncCategoryState();
   window.requestAnimationFrame(() => {
+    if (isMobileLayout()) {
+      syncCategoryState();
+      return;
+    }
     syncContactSheetGrid();
     applyLayoutEdits();
     observeContactSheets();
@@ -634,7 +695,6 @@ function buildFullscreenFromSourceFrames(category, setKey, images) {
       img.addEventListener("load", fitFullscreenSetLayout);
       img.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (layoutEditorActive) return;
         openHighResImage(imageIndex);
       });
     }
@@ -702,7 +762,6 @@ function renderFullscreenSet(category, setKey) {
     img.addEventListener("load", fitFullscreenSetLayout);
     img.addEventListener("click", (event) => {
       event.stopPropagation();
-      if (layoutEditorActive) return;
       openHighResImage(imageIndex);
     });
     imgElements.push(img);
@@ -737,9 +796,6 @@ function openFullscreenSet(category, setKey) {
 
 function closeFullscreenSet() {
   closeHighResImage();
-  if (selectedLayoutElement?.classList.contains("fullscreen-editable-frame")) {
-    selectLayoutElement(null);
-  }
   fullscreenSetActive = false;
   fullscreenSetViewer.classList.remove("is-active");
   fullscreenSetViewer.setAttribute("aria-hidden", "true");
@@ -822,7 +878,77 @@ function clearHoveredSet(sheet) {
 }
 
 function orderedCategories() {
-  return Array.from(categoryItems).map((item) => item.dataset.category);
+  const categories = Array.from(categoryItems).map((item) => item.dataset.category);
+  return categories;
+}
+
+function orderedSetKeys(category = currentCategory) {
+  return categorySets(category).map(([setKey]) => setKey);
+}
+
+function mobileSlideId(category, setKey) {
+  return `mobile-slide-${category}-${setKey}`;
+}
+
+function createMobileSlide(category, setKey) {
+  const slide = document.createElement("section");
+  slide.className = "mobile-slide";
+  slide.dataset.category = category;
+  slide.dataset.setKey = setKey;
+  slide.id = mobileSlideId(category, setKey);
+
+  const images = galleryData[category]?.[setKey] || [];
+  slide.style.setProperty("--mobile-slide-count", String(Math.max(1, images.length)));
+
+  const stack = document.createElement("div");
+  stack.className = "mobile-slide-stack";
+
+  images.forEach((src, imageIndex) => {
+    const frame = document.createElement("figure");
+    frame.className = "mobile-slide-frame";
+    frame.dataset.index = String(imageIndex + 1);
+    const openFrame = () => {
+      fullscreenSetCategory = category;
+      fullscreenSetKey = setKey;
+      currentCategory = category;
+      currentMobileSetKey = setKey;
+      openHighResImage(imageIndex);
+    };
+
+    frame.addEventListener("touchend", (event) => {
+      if (!mobileSwipeStart) return;
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+
+      const dx = Math.abs(touch.clientX - mobileSwipeStart.x);
+      const dy = Math.abs(touch.clientY - mobileSwipeStart.y);
+      if (Math.max(dx, dy) < 20) {
+        event.preventDefault();
+        event.stopPropagation();
+        openFrame();
+      }
+    }, { passive: false });
+
+    frame.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openFrame();
+    });
+
+    const img = document.createElement("img");
+    applyResponsivePreview(img, src, { mode: "set" });
+    img.alt = fileName(src);
+    img.loading = imageIndex === 0 ? "eager" : "lazy";
+    img.decoding = "async";
+    img.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+    frame.appendChild(img);
+    stack.appendChild(frame);
+  });
+
+  slide.appendChild(stack);
+  return slide;
 }
 
 function realSheets() {
@@ -833,18 +959,15 @@ function sheetScrollLeft(sheet) {
   if (!gallery || !sheet) return 0;
 
   const firstSheet = gallery.querySelector(".contact-sheet");
-  const galleryOffset = firstSheet ? firstSheet.offsetLeft : gallery.offsetLeft;
+  const galleryOffset = firstSheet ? sheetScrollPosition(firstSheet) : 0;
 
-  return Math.max(0, sheet.offsetLeft - galleryOffset);
+  return Math.max(0, sheetScrollPosition(sheet) - galleryOffset);
 }
 
 function scrollToSheet(sheet, behavior = "smooth") {
   if (!gallery || !sheet) return;
 
-  gallery.scrollTo({
-    left: sheetScrollLeft(sheet),
-    behavior
-  });
+  scrollGalleryTo(sheetScrollLeft(sheet), behavior);
 }
 
 function snapToCategory(category) {
@@ -857,7 +980,11 @@ function snapToCategory(category) {
 
   gallery.style.scrollBehavior = "auto";
   gallery.style.scrollSnapType = "none";
-  gallery.scrollLeft = sheetScrollLeft(target);
+  if (isMobileLayout()) {
+    gallery.scrollTop = sheetScrollLeft(target);
+  } else {
+    gallery.scrollLeft = sheetScrollLeft(target);
+  }
 
   window.requestAnimationFrame(() => {
     gallery.style.scrollBehavior = previousBehavior;
@@ -873,9 +1000,15 @@ function setCategory(category) {
   if (!galleryData[category]) return;
 
   currentCategory = category;
+  currentMobileSetKey = orderedSetKeys(category)[0] || currentMobileSetKey;
   pendingLoopCategory = "";
   setMode("work");
   syncCategoryState();
+
+  if (isMobileLayout()) {
+    renderCurrentSet();
+    return;
+  }
 
   const target = document.getElementById(`sheet-${category}`);
   hydrateContactSheet(target);
@@ -890,19 +1023,34 @@ function syncCategoryFromScroll() {
   const sheets = realSheets();
   if (!sheets.length) return;
 
-  const galleryCenter = gallery.scrollLeft + gallery.clientWidth / 2;
+  const galleryCenter = galleryScrollPosition() + galleryViewSize() / 2;
   const activeSheet = sheets.reduce((nearest, sheet) => {
-    const sheetCenter = sheetScrollLeft(sheet) + sheet.offsetWidth / 2;
+    const sheetCenter = sheetScrollLeft(sheet) + sheetViewSize(sheet) / 2;
     const distance = Math.abs(sheetCenter - galleryCenter);
     return !nearest || distance < nearest.distance ? { sheet, distance } : nearest;
   }, null)?.sheet;
 
   const category = activeSheet?.dataset.category;
-  if (!category || category === currentCategory) return;
+  if (isMobileLayout()) {
+    const setKey = activeSheet?.dataset.setKey;
+    const hasSetKey = Boolean(setKey && setKey !== currentMobileSetKey);
+    if (hasSetKey) {
+      currentMobileSetKey = setKey;
+    }
 
-  currentCategory = category;
-  syncCategoryMenu();
-  syncCategoryState();
+    if (!category || category === currentCategory) {
+      if (!hasSetKey) return;
+    }
+  } else if (!category || category === currentCategory) {
+    return;
+  }
+
+  if (category && category !== currentCategory) {
+    currentCategory = category;
+    syncCategoryMenu();
+    syncCategoryState();
+  }
+
   hydrateContactSheet(activeSheet);
   syncContactSheetGrid();
   applyLayoutEdits();
@@ -911,8 +1059,26 @@ function syncCategoryFromScroll() {
 function stepCategory(direction) {
   if (sheetLoopLock || sheetSnapLock) return;
 
+  if (isMobileLayout()) {
+    const category = currentCategory;
+    const setKeys = orderedSetKeys(category);
+    if (!setKeys.length) return;
+
+    const currentIndex = setKeys.indexOf(currentMobileSetKey);
+    const nextIndex = ((currentIndex + direction) % setKeys.length + setKeys.length) % setKeys.length;
+    currentMobileSetKey = setKeys[nextIndex];
+    currentCategory = category;
+    pendingLoopCategory = "";
+    syncCategoryMenu();
+    syncCategoryState();
+    renderCurrentSet();
+    return;
+  }
+
   const categories = orderedCategories();
   const currentIndex = categories.indexOf(currentCategory);
+  const nextIndex = ((currentIndex + direction) % categories.length + categories.length) % categories.length;
+
   const firstReal = document.getElementById(`sheet-${categories[0]}`);
   const lastReal = document.getElementById(`sheet-${categories[categories.length - 1]}`);
   const leadingClone = gallery.querySelector(".contact-sheet[data-clone='true']:first-child");
@@ -938,18 +1104,30 @@ function stepCategory(direction) {
     return;
   }
 
-  const nextIndex = ((currentIndex + direction) % categories.length + categories.length) % categories.length;
-  const target = realSheets()[nextIndex];
-
   currentCategory = categories[nextIndex];
   pendingLoopCategory = "";
   syncCategoryMenu();
   syncCategoryState();
-  scrollToSheet(target);
+  scrollToSheet(realSheets()[nextIndex]);
+}
+
+function stepMobileUniverse(direction) {
+  if (!isMobileLayout() || sheetLoopLock || sheetSnapLock) return;
+
+  const categories = orderedCategories();
+  const currentIndex = categories.indexOf(currentCategory);
+  const nextIndex = ((currentIndex + direction) % categories.length + categories.length) % categories.length;
+  currentCategory = categories[nextIndex];
+  currentMobileSetKey = orderedSetKeys(currentCategory)[0] || "";
+  pendingLoopCategory = "";
+  syncCategoryMenu();
+  syncCategoryState();
+  renderCurrentSet();
 }
 
 function loopSheetFromEdge(delta) {
   if (!gallery) return false;
+  if (isMobileLayout()) return false;
   if (sheetLoopLock || sheetSnapLock) return true;
 
   const categories = orderedCategories();
@@ -982,7 +1160,7 @@ function loopSheetFromEdge(delta) {
 }
 
 function normalizeCloneScroll() {
-  if (!gallery || sheetSnapLock) return;
+  if (!gallery || sheetSnapLock || isMobileLayout()) return;
 
   const categories = orderedCategories();
   const firstReal = document.getElementById(`sheet-${categories[0]}`);
@@ -1022,10 +1200,19 @@ function handleResize() {
 
   resizeFrame = window.requestAnimationFrame(() => {
     resizeFrame = 0;
+    const layoutChanged = syncResponsiveLayoutMode();
+    if (layoutChanged) {
+      renderCurrentSet();
+      return;
+    }
     sheetLoopLock = false;
     pendingLoopCategory = "";
-    syncContactSheetGrid();
-    snapToCategory(currentCategory);
+    if (isMobileLayout()) {
+      renderCurrentSet();
+    } else {
+      syncContactSheetGrid();
+      snapToCategory(currentCategory);
+    }
     if (fullscreenSetActive) {
       renderFullscreenSet(fullscreenSetCategory, fullscreenSetKey);
     }
@@ -1247,337 +1434,13 @@ function applyLayoutEdits() {
   });
 }
 
-function setLayoutEditor(active) {
-  layoutEditorActive = active;
-
-  if (active && isFreeContactCategory(currentCategory)) {
-    layoutTarget = "image";
-  }
-
-  document.body.classList.toggle("layout-editor-mode", active);
-  layoutEditToggle?.classList.toggle("is-active", active);
-  syncLayoutTarget();
-}
-
-function syncLayoutTarget() {
-  document.body.classList.toggle("layout-target-image", layoutTarget === "image");
-  document.body.classList.toggle("layout-target-set", layoutTarget === "set");
-
-  if (layoutTargetToggle) {
-    layoutTargetToggle.textContent = layoutTarget;
-  }
-
-  syncLayoutSizeControl();
-}
-
-function selectLayoutElement(element) {
-  selectedLayoutElement?.classList.remove("is-selected");
-  selectedLayoutElement = element;
-  selectedLayoutElement?.classList.add("is-selected");
-  syncLayoutSizeControl();
-}
-
-function syncLayoutSizeControl() {
-  if (!layoutSize) return;
-
-  const selectedIsFullscreen = selectedLayoutElement?.classList.contains("fullscreen-editable-frame");
-  if ((!selectedIsFullscreen && layoutTarget !== "image") || !selectedLayoutElement) {
-    layoutSize.value = "50";
-    layoutSize.disabled = true;
-    return;
-  }
-
-  layoutSize.disabled = false;
-  const scale = selectedIsFullscreen
-    ? Number(selectedLayoutElement.dataset.openScale || 1)
-    : Number(selectedLayoutElement.dataset.scale || 1);
-  layoutSize.value = scaleToSliderValue(scale, layoutScaleRangeForSelection());
-}
-
-function resetCurrentLayoutEdits() {
-  const edits = readStoredLayoutEdits();
-  const prefix = `${currentCategory}.`;
-
-  Object.keys(edits.sets).forEach((key) => {
-    if (key.startsWith(prefix)) {
-      delete edits.sets[key];
-    }
-  });
-
-  Object.keys(edits.images).forEach((key) => {
-    if (key.startsWith(prefix)) {
-      delete edits.images[key];
-    }
-  });
-
-  writeLayoutEdits(edits);
-  applyLayoutEdits();
-}
-
-function resetCurrentOpenSetLayoutEdits() {
-  const edits = readStoredOpenLayoutEdits();
-  const setPrefix = `${fullscreenSetCategory}.${fullscreenSetKey}.`;
-  let changed = false;
-
-  Object.keys(edits).forEach((key) => {
-    if (key.startsWith(setPrefix)) {
-      delete edits[key];
-      changed = true;
-    }
-  });
-
-  if (!changed) return;
-
-  writeOpenLayoutEdits(edits);
-  if (fullscreenSetActive) {
-    renderFullscreenSet(fullscreenSetCategory, fullscreenSetKey);
-  }
-}
-
-async function copyLayoutEdits() {
-  const grid = readLayoutEdits();
-  const payload = {
-    grid: {
-      sets: grid.sets,
-      images: grid.images
-    },
-    setview: readOpenLayoutEdits()
-  };
-  const json = JSON.stringify(payload, null, 2);
-
-  try {
-    await navigator.clipboard.writeText(json);
-    layoutCopy.textContent = "copied all";
-    window.setTimeout(() => {
-      layoutCopy.textContent = "copy";
-    }, 1000);
-  } catch {
-    window.prompt("Layout edits (grid + setview)", json);
-  }
-}
-
-function beginLayoutDrag(event) {
-  if (!layoutEditorActive || event.button !== 0) return;
-
-  const fullscreenTarget = event.target.closest(".fullscreen-editable-frame");
-  if (fullscreenSetActive && fullscreenTarget && fullscreenSetViewer.contains(fullscreenTarget)) {
-    event.preventDefault();
-    event.stopPropagation();
-    layoutTarget = "image";
-    syncLayoutTarget();
-    selectLayoutElement(fullscreenTarget);
-
-    activeLayoutDrag = {
-      target: fullscreenTarget,
-      type: "open-image",
-      pointerId: event.pointerId,
-      originX: event.clientX,
-      originY: event.clientY,
-      startX: Number(fullscreenTarget.dataset.openEditX || 0),
-      startY: Number(fullscreenTarget.dataset.openEditY || 0)
-    };
-
-    fullscreenTarget.classList.add("is-dragging");
-    fullscreenTarget.setPointerCapture(event.pointerId);
-    return;
-  }
-
-  const target = layoutTarget === "image"
-    ? event.target.closest(".contact-frame")
-    : event.target.closest(".contact-set");
-
-  if (!target || !gallery.contains(target)) return;
-
-  event.preventDefault();
-  event.stopPropagation();
-  selectLayoutElement(target);
-
-  const startX = Number(target.dataset.editX || 0);
-  const startY = Number(target.dataset.editY || 0);
-  const rect = target.closest(".contact-sheet")?.getBoundingClientRect();
-
-  activeLayoutDrag = {
-    target,
-    type: layoutTarget,
-    pointerId: event.pointerId,
-    originX: event.clientX,
-    originY: event.clientY,
-    startX,
-    startY,
-    startFreeX: Number(target.dataset.freeX || 50),
-    startFreeY: Number(target.dataset.freeY || 50),
-    sheetWidth: rect?.width || 1,
-    sheetHeight: rect?.height || 1,
-    isFreeSet: layoutTarget === "set" && Boolean(target.closest(".free-contact-sheet")),
-    isFreeImage: layoutTarget === "image" && Boolean(target.closest(".free-contact-sheet"))
-  };
-
-  target.classList.add("is-dragging");
-  target.setPointerCapture(event.pointerId);
-}
-
-function moveLayoutDrag(event) {
-  if (!activeLayoutDrag || event.pointerId !== activeLayoutDrag.pointerId) return;
-
-  if (activeLayoutDrag.type === "open-image") {
-    const nextX = activeLayoutDrag.startX + event.clientX - activeLayoutDrag.originX;
-    const nextY = activeLayoutDrag.startY + event.clientY - activeLayoutDrag.originY;
-    setFullscreenFrameEdit(activeLayoutDrag.target, {
-      x: nextX,
-      y: nextY,
-      scale: Number(activeLayoutDrag.target.dataset.openScale || 1)
-    });
-    return;
-  }
-
-  const nextX = activeLayoutDrag.startX + event.clientX - activeLayoutDrag.originX;
-  const nextY = activeLayoutDrag.startY + event.clientY - activeLayoutDrag.originY;
-
-  if (activeLayoutDrag.isFreeImage) {
-    const nextFreeX = activeLayoutDrag.startFreeX + ((event.clientX - activeLayoutDrag.originX) / activeLayoutDrag.sheetWidth) * 100;
-    const nextFreeY = activeLayoutDrag.startFreeY + ((event.clientY - activeLayoutDrag.originY) / activeLayoutDrag.sheetHeight) * 100;
-    setFreeContactFramePosition(activeLayoutDrag.target, nextFreeX, nextFreeY);
-  } else if (activeLayoutDrag.type === "image") {
-    setContactFrameEdit(activeLayoutDrag.target, {
-      x: nextX,
-      y: nextY,
-      scale: Number(activeLayoutDrag.target.dataset.scale || 1)
-    }, { raw: true });
-  } else if (activeLayoutDrag.isFreeSet) {
-    const nextFreeX = activeLayoutDrag.startFreeX + ((event.clientX - activeLayoutDrag.originX) / activeLayoutDrag.sheetWidth) * 100;
-    const nextFreeY = activeLayoutDrag.startFreeY + ((event.clientY - activeLayoutDrag.originY) / activeLayoutDrag.sheetHeight) * 100;
-    setFreeContactSetPosition(activeLayoutDrag.target, nextFreeX, nextFreeY);
-  } else {
-    setContactSetOffset(activeLayoutDrag.target, nextX, nextY, { raw: true });
-  }
-}
-
-function endLayoutDrag(event) {
-  if (!activeLayoutDrag || event.pointerId !== activeLayoutDrag.pointerId) return;
-
-  if (activeLayoutDrag.type === "open-image") {
-    const target = activeLayoutDrag.target;
-    const edits = readStoredOpenLayoutEdits();
-    const x = Number(target.dataset.openEditX || 0);
-    const y = Number(target.dataset.openEditY || 0);
-    const scale = Number(target.dataset.openScale || 1);
-
-    if (Math.abs(x) < 1 && Math.abs(y) < 1 && Math.abs(scale - 1) < 0.01) {
-      delete edits[target.dataset.openLayoutKey];
-    } else {
-      edits[target.dataset.openLayoutKey] = { x, y, scale };
-    }
-
-    writeOpenLayoutEdits(edits);
-    target.classList.remove("is-dragging");
-    activeLayoutDrag = null;
-    return;
-  }
-
-  const { target, type } = activeLayoutDrag;
-  const edits = readStoredLayoutEdits();
-  const x = Number(target.dataset.editX || 0);
-  const y = Number(target.dataset.editY || 0);
-  const scale = Number(target.dataset.scale || 1);
-  const store = type === "image" ? edits.images : edits.sets;
-
-  if (activeLayoutDrag.isFreeImage) {
-    store[target.dataset.layoutKey] = {
-      x: Number(target.dataset.freeX || 50),
-      y: Number(target.dataset.freeY || 50),
-      scale
-    };
-  } else if (activeLayoutDrag.isFreeSet) {
-    store[target.dataset.layoutKey] = {
-      x: Number(target.dataset.freeX || 50),
-      y: Number(target.dataset.freeY || 50)
-    };
-  } else if (Math.abs(x) < 1 && Math.abs(y) < 1 && Math.abs(scale - 1) < 0.01) {
-    delete store[target.dataset.layoutKey];
-  } else {
-    store[target.dataset.layoutKey] = type === "image" ? { x, y, scale } : { x, y };
-  }
-
-  writeLayoutEdits(edits);
-  target.classList.remove("is-dragging");
-  activeLayoutDrag = null;
-}
-
 categoryItems.forEach((item) => {
   item.addEventListener("click", () => {
     setCategory(item.dataset.category);
   });
 });
 
-layoutEditToggle?.addEventListener("click", () => {
-  setLayoutEditor(!layoutEditorActive);
-});
-
-layoutTargetToggle?.addEventListener("click", () => {
-  if (isFreeContactCategory(currentCategory)) {
-    layoutTarget = "image";
-    syncLayoutTarget();
-    return;
-  }
-
-  layoutTarget = layoutTarget === "set" ? "image" : "set";
-  selectLayoutElement(null);
-  syncLayoutTarget();
-});
-
-layoutSize?.addEventListener("input", () => {
-  if (!selectedLayoutElement) return;
-  const isFullscreenSelection = selectedLayoutElement.classList.contains("fullscreen-editable-frame");
-  if (!isFullscreenSelection && layoutTarget !== "image") return;
-
-  const scale = sliderValueToScale(layoutSize.value, layoutScaleRangeForSelection());
-
-  if (isFullscreenSelection) {
-    const edits = readStoredOpenLayoutEdits();
-    const x = Number(selectedLayoutElement.dataset.openEditX || 0);
-    const y = Number(selectedLayoutElement.dataset.openEditY || 0);
-    edits[selectedLayoutElement.dataset.openLayoutKey] = { x, y, scale };
-    writeOpenLayoutEdits(edits);
-    setFullscreenFrameEdit(selectedLayoutElement, { x, y, scale });
-    return;
-  }
-
-  const edits = readStoredLayoutEdits();
-  const x = Number(selectedLayoutElement.dataset.editX || 0);
-  const y = Number(selectedLayoutElement.dataset.editY || 0);
-  edits.images[selectedLayoutElement.dataset.layoutKey] = selectedLayoutElement.closest(".free-contact-sheet")
-    ? {
-      x: Number(selectedLayoutElement.dataset.freeX || 50),
-      y: Number(selectedLayoutElement.dataset.freeY || 50),
-      scale
-    }
-    : { x, y, scale };
-  writeLayoutEdits(edits);
-  setContactFrameEdit(selectedLayoutElement, { x, y, scale }, { raw: true });
-});
-
-layoutReset?.addEventListener("click", () => {
-  if (fullscreenSetActive) {
-    resetCurrentOpenSetLayoutEdits();
-    return;
-  }
-
-  resetCurrentLayoutEdits();
-});
-
-layoutCopy?.addEventListener("click", copyLayoutEdits);
-
-gallery.addEventListener("pointerdown", beginLayoutDrag);
-gallery.addEventListener("pointermove", moveLayoutDrag);
-gallery.addEventListener("pointerup", endLayoutDrag);
-gallery.addEventListener("pointercancel", endLayoutDrag);
-fullscreenSetViewer.addEventListener("pointerdown", beginLayoutDrag);
-fullscreenSetViewer.addEventListener("pointermove", moveLayoutDrag);
-fullscreenSetViewer.addEventListener("pointerup", endLayoutDrag);
-fullscreenSetViewer.addEventListener("pointercancel", endLayoutDrag);
-
 fullscreenSetViewer.addEventListener("click", (event) => {
-  if (layoutEditorActive) return;
   if (event.target.closest(".fullscreen-hud")) return;
   if (!event.target.closest(".fullscreen-set-item")) {
     closeFullscreenSet();
@@ -1735,30 +1598,34 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key.toLowerCase() === "l") {
-    event.preventDefault();
-    setLayoutEditor(!layoutEditorActive);
-    return;
-  }
-
-  if (layoutEditorActive && event.key.toLowerCase() === "i") {
-    event.preventDefault();
-    if (isFreeContactCategory(currentCategory)) {
-      layoutTarget = "image";
-      syncLayoutTarget();
-      return;
-    }
-
-    layoutTarget = layoutTarget === "set" ? "image" : "set";
-    selectLayoutElement(null);
-    syncLayoutTarget();
-    return;
-  }
-
   if (workView.classList.contains("is-hidden")) {
     if (event.key === "Escape") {
       event.preventDefault();
       setMode("work");
+    }
+
+    return;
+  }
+
+  if (isMobileLayout()) {
+    if (event.key === "ArrowRight" || event.key === "PageDown") {
+      stepMobileUniverse(1);
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "PageUp") {
+      stepMobileUniverse(-1);
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      stepCategory(-1);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      stepCategory(1);
+      return;
     }
 
     return;
@@ -1789,11 +1656,74 @@ workView.addEventListener(
 
     event.preventDefault();
     const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+
+    if (isMobileLayout()) {
+      if (Math.abs(event.deltaY) >= Math.abs(event.deltaX)) {
+        stepCategory(delta > 0 ? -1 : 1);
+      } else {
+        stepMobileUniverse(delta > 0 ? 1 : -1);
+      }
+      return;
+    }
+
     if (loopSheetFromEdge(delta)) return;
 
     gallery.scrollBy({ left: delta, behavior: "auto" });
   },
   { passive: false }
+);
+
+workView.addEventListener(
+  "touchstart",
+  (event) => {
+    if (!isMobileLayout() || workView.classList.contains("is-hidden")) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    mobileSwipeStart = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now()
+    };
+  },
+  { passive: true }
+);
+
+workView.addEventListener(
+  "touchend",
+  (event) => {
+    if (!isMobileLayout() || workView.classList.contains("is-hidden") || !mobileSwipeStart) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+
+    const dx = touch.clientX - mobileSwipeStart.x;
+    const dy = touch.clientY - mobileSwipeStart.y;
+    const elapsed = Date.now() - mobileSwipeStart.time;
+    mobileSwipeStart = null;
+
+    if (elapsed > 800) return;
+
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    const threshold = 28;
+
+    if (Math.max(absX, absY) < threshold) return;
+
+    if (absY >= absX) {
+      stepCategory(dy > 0 ? -1 : 1);
+    } else {
+      stepMobileUniverse(dx > 0 ? -1 : 1);
+    }
+  },
+  { passive: true }
+);
+
+workView.addEventListener(
+  "touchcancel",
+  () => {
+    mobileSwipeStart = null;
+  },
+  { passive: true }
 );
 
 gallery.addEventListener("scroll", () => {
@@ -1808,5 +1738,6 @@ gallery.addEventListener("scroll", () => {
 
 window.addEventListener("resize", handleResize);
 
+syncResponsiveLayoutMode();
 renderCurrentSet();
 setMode("work");
