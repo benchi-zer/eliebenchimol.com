@@ -52,7 +52,8 @@ let highResImageIndex = 0;
 let contactSheetObserver = null;
 let mobileSwipeStart = null;
 const MOBILE_LAYOUT_QUERY = window.matchMedia("(max-width: 760px)");
-let mobileLayoutActive = MOBILE_LAYOUT_QUERY.matches;
+const COARSE_POINTER_QUERY = window.matchMedia("(pointer: coarse)");
+let mobileLayoutActive = false;
 const PREVIEW_CACHE_BUST = "20260423-2";
 const HIGH_RES_PREVIEW_WIDTH = 2000;
 const PREVIEW_WIDTHS = [480, 960];
@@ -134,8 +135,15 @@ function isMobileLayout() {
   return mobileLayoutActive;
 }
 
+function detectMobileLayout() {
+  const viewportWidth = window.visualViewport?.width || window.innerWidth;
+  const layoutViewportWidth = window.innerWidth;
+  const coarsePointer = COARSE_POINTER_QUERY.matches || navigator.maxTouchPoints > 0;
+  return viewportWidth <= 760 || layoutViewportWidth <= 760 || (coarsePointer && viewportWidth <= 900);
+}
+
 function syncResponsiveLayoutMode() {
-  const next = MOBILE_LAYOUT_QUERY.matches;
+  const next = detectMobileLayout();
   const changed = next !== mobileLayoutActive;
   mobileLayoutActive = next;
   document.body.classList.toggle("mobile-layout", mobileLayoutActive);
@@ -1737,6 +1745,8 @@ gallery.addEventListener("scroll", () => {
 });
 
 window.addEventListener("resize", handleResize);
+window.addEventListener("orientationchange", handleResize);
+window.visualViewport?.addEventListener("resize", handleResize);
 
 syncResponsiveLayoutMode();
 renderCurrentSet();
