@@ -23,8 +23,7 @@ const brand = document.querySelector(".brand");
 const workView = document.getElementById("work-view");
 const categoryItems = document.querySelectorAll(".category-item");
 const highResImageViewer = document.getElementById("high-res-image-viewer");
-const highResImage = highResImageViewer.querySelector("img");
-const highResClose = document.getElementById("high-res-close");
+const highResImageStrip = highResImageViewer.querySelector(".high-res-image-strip");
 const mobileProgressFill = document.querySelector(".mobile-progress-fill");
 const mobilePrevSetButton = document.getElementById("mobile-prev-set");
 const mobileNextSetButton = document.getElementById("mobile-next-set");
@@ -32,7 +31,6 @@ const mobileSetIndicator = document.getElementById("mobile-set-indicator");
 
 let currentCategory = "portraits";
 let currentMobileSetKey = "SET1";
-let wheelLock = false;
 let categorySyncFrame = 0;
 let resizeFrame = 0;
 let sheetLoopLock = false;
@@ -42,6 +40,7 @@ let highResSetCategory = "portraits";
 let highResSetKey = "SET1";
 let highResImageActive = false;
 let highResImageIndex = 0;
+let highResGestureStart = null;
 let contactSheetObserver = null;
 let mobileSwipeStart = null;
 const MOBILE_LAYOUT_QUERY = window.matchMedia("(max-width: 760px)");
@@ -56,6 +55,9 @@ const SET_IMAGE_SIZES = "(max-width: 760px) 90vw, (max-width: 1200px) 70vw, 52vw
 const GRID_LAYOUT_SCALE_RANGE = { min: 0.25, max: 12 };
 const SETVIEW_LAYOUT_SCALE_RANGE = { min: 0.25, max: 1.35 };
 const LAYOUT_STORAGE_VERSION = "2026-04-23-layout-v2";
+const OVERLAY_KEYS = new Set(["Escape", "ArrowRight", "ArrowDown", "PageDown", "ArrowLeft", "ArrowUp", "PageUp"]);
+const CATEGORY_BUTTONS = Array.from(categoryItems);
+const CATEGORY_LABELS = new Map(CATEGORY_BUTTONS.map((item) => [item.dataset.category, item.textContent.trim()]));
 const hasSetVariantManifest = Array.isArray(window.__SET_VARIANT_PATHS);
 const setVariantPathSet = hasSetVariantManifest ? new Set(window.__SET_VARIANT_PATHS) : null;
 function fileName(path) {
@@ -99,6 +101,16 @@ function applyResponsivePreview(img, path, options = {}) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function wrappedIndex(index, direction, length) {
+  if (!length) return -1;
+  return ((index + direction) % length + length) % length;
+}
+
+function shiftedValue(values, currentValue, direction) {
+  if (!values.length) return "";
+  return values[wrappedIndex(values.indexOf(currentValue), direction, values.length)];
 }
 
 function setCssPositionVars(node, xVar, yVar, x, y, unit = "px") {
@@ -221,8 +233,42 @@ function maybeAdjustTwoImageLayout(grid, images, imgElements) {
   updateLayout();
 }
 
+// Category model:
+// - Category ids come from the `data-category` buttons in index.html.
+// - Photo groups for each category live in portfolio-data.js.
+// - Desktop renders one category at a time; mobile renders the sets inside the active category.
 function categorySets(category) {
   return Object.entries(galleryData[category]);
+}
+
+function orderedCategories() {
+  return CATEGORY_BUTTONS.map((item) => item.dataset.category);
+}
+
+function orderedSetKeys(category = currentCategory) {
+  return categorySets(category).map(([setKey]) => setKey);
+}
+
+function firstSetKey(category) {
+  return orderedSetKeys(category)[0] || "";
+}
+
+function setActiveCategory(category, options = {}) {
+  if (!galleryData[category]) return false;
+
+  currentCategory = category;
+  currentMobileSetKey = firstSetKey(category) || currentMobileSetKey;
+
+  if (options.resetLoop !== false) {
+    pendingLoopCategory = "";
+  }
+
+  if (options.sync !== false) {
+    syncCategoryMenu();
+    syncCategoryState();
+  }
+
+  return true;
 }
 
 function syncCategoryState() {
@@ -232,7 +278,7 @@ function syncCategoryState() {
 function syncCategoryMenu() {
   const isWork = !workView.classList.contains("is-hidden");
 
-  categoryItems.forEach((entry) => {
+  CATEGORY_BUTTONS.forEach((entry) => {
     const isActive = isWork && entry.dataset.category === currentCategory;
 
     entry.classList.toggle("is-active", isActive);
@@ -271,8 +317,7 @@ function syncMobileProgress() {
 }
 
 function categoryLabelFor(category) {
-  const match = Array.from(categoryItems).find((item) => item.dataset.category === category);
-  return match?.textContent?.trim() || category;
+  return CATEGORY_LABELS.get(category) || category;
 }
 
 function syncMobileDock() {
@@ -611,11 +656,11 @@ function observeContactSheets() {
   });
 }
 
-function renderCurrentSet() {
+function renderCurrentSet({ suppressIntro = false } = {}) {
   gallery.innerHTML = "";
   gallery.className = isMobileLayout()
     ? "gallery mobile-feed mobile-layout"
-    : "gallery portfolio-grid";
+    : `gallery portfolio-grid${suppressIntro ? " no-card-intro" : ""}`;
 
   if (isMobileLayout()) {
     const categories = orderedCategories();
@@ -659,13 +704,71 @@ function currentHighResSetImages() {
   return galleryData[highResSetCategory]?.[highResSetKey] || [];
 }
 
-function renderHighResImage() {
-  const images = currentHighResSetImages();
-  const src = images[highResImageIndex];
-  if (!src) return;
+function openSetImage(category, setKey, imageIndex) {
+  highResSetCategory = category;
+  highResSetKey = setKey;
+  currentCategory = category;
+  currentMobileSetKey = setKey;
+  openHighResImage(imageIndex);
+  syncCategoryMenu();
+  syncCategoryState();
+}
 
-  highResImage.src = toHighResPreviewPath(src);
-  highResImage.alt = fileName(src);
+function renderHighResImage() {
+  if (!highResImageStrip) return;
+
+  const images = currentHighResSetImages();
+  highResImageStrip.innerHTML = "";
+
+  images.forEach((src, index) => {
+    const frame = document.createElement("figure");
+    frame.className = "high-res-image-frame";
+    frame.dataset.index = String(index);
+
+    const img = document.createElement("img");
+    img.src = toHighResPreviewPath(src);
+    img.alt = fileName(src);
+    img.decoding = "async";
+    img.loading = Math.abs(index - highResImageIndex) <= 1 ? "eager" : "lazy";
+
+    frame.appendChild(img);
+    highResImageStrip.appendChild(frame);
+  });
+}
+
+function scrollHighResToIndex(index, behavior = "smooth") {
+  if (!highResImageStrip) return;
+
+  const frame = highResImageStrip.querySelector(`.high-res-image-frame[data-index="${index}"]`);
+  if (!frame) return;
+
+  const images = currentHighResSetImages();
+  let left = frame.offsetLeft;
+
+  if (!isMobileLayout()) {
+    if (index <= 0) {
+      left = 0;
+    } else if (index >= images.length - 1) {
+      left = highResImageViewer.scrollWidth - highResImageViewer.clientWidth;
+    }
+  }
+
+  highResImageViewer.scrollTo({ left, top: 0, behavior });
+}
+
+function highResFrameCenter(frame) {
+  return frame.offsetLeft + frame.offsetWidth * 0.5;
+}
+
+function highResViewerCenter() {
+  return highResImageViewer.scrollLeft + highResImageViewer.clientWidth * 0.5;
+}
+
+function normalizedWheelDelta(event) {
+  const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return dominantDelta * 32;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return dominantDelta * highResImageViewer.clientWidth;
+  return dominantDelta;
 }
 
 function openHighResImage(index) {
@@ -673,11 +776,14 @@ function openHighResImage(index) {
   if (!images.length) return;
 
   highResImageActive = true;
-  highResImageIndex = ((index % images.length) + images.length) % images.length;
+  highResImageIndex = wrappedIndex(index, 0, images.length);
   renderHighResImage();
   highResImageViewer.classList.add("is-active");
   highResImageViewer.setAttribute("aria-hidden", "false");
   document.body.classList.add("high-res-image-mode");
+  window.requestAnimationFrame(() => {
+    scrollHighResToIndex(highResImageIndex, "auto");
+  });
 }
 
 function closeHighResImage() {
@@ -687,16 +793,19 @@ function closeHighResImage() {
   highResImageViewer.classList.remove("is-active");
   highResImageViewer.setAttribute("aria-hidden", "true");
   document.body.classList.remove("high-res-image-mode");
-  highResImage.removeAttribute("src");
-  highResImage.removeAttribute("alt");
+  highResImageViewer.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  if (highResImageStrip) {
+    highResImageStrip.innerHTML = "";
+  }
 }
 
 function stepHighResImage(direction) {
   const images = currentHighResSetImages();
   if (!images.length) return;
 
-  highResImageIndex = ((highResImageIndex + direction) % images.length + images.length) % images.length;
-  renderHighResImage();
+  highResImageIndex = wrappedIndex(highResImageIndex, direction, images.length);
+  if (isMobileLayout()) return;
+  scrollHighResToIndex(highResImageIndex);
 }
 
 function setHoveredSet(sheet, setKey) {
@@ -717,15 +826,6 @@ function clearHoveredSet(sheet) {
   sheet.querySelectorAll(".contact-frame.is-set-hovered").forEach((frame) => {
     frame.classList.remove("is-set-hovered");
   });
-}
-
-function orderedCategories() {
-  const categories = Array.from(categoryItems).map((item) => item.dataset.category);
-  return categories;
-}
-
-function orderedSetKeys(category = currentCategory) {
-  return categorySets(category).map(([setKey]) => setKey);
 }
 
 function mobileSlideId(category, setKey) {
@@ -749,13 +849,7 @@ function createMobileSlide(category, setKey) {
     const frame = document.createElement("figure");
     frame.className = "mobile-slide-frame";
     frame.dataset.index = String(imageIndex + 1);
-    const openFrame = () => {
-      highResSetCategory = category;
-      highResSetKey = setKey;
-      currentCategory = category;
-      currentMobileSetKey = setKey;
-      openHighResImage(imageIndex);
-    };
+    const openFrame = () => openSetImage(category, setKey, imageIndex);
 
     frame.addEventListener("touchend", (event) => {
       if (!mobileSwipeStart) return;
@@ -833,13 +927,7 @@ function createPortfolioSetCard(category, setKey, options = {}) {
 
     frame.addEventListener("click", (event) => {
       event.preventDefault();
-      highResSetCategory = category;
-      highResSetKey = setKey;
-      currentCategory = category;
-      currentMobileSetKey = setKey;
-      openHighResImage(imageIndex);
-      syncCategoryMenu();
-      syncCategoryState();
+      openSetImage(category, setKey, imageIndex);
     });
 
     const img = document.createElement("img");
@@ -948,30 +1036,20 @@ function snapToCategory(category) {
 }
 
 function setCategory(category) {
-  if (!galleryData[category]) return;
+  if (!setActiveCategory(category, { sync: false })) return;
 
-  currentCategory = category;
-  currentMobileSetKey = orderedSetKeys(category)[0] || currentMobileSetKey;
-  pendingLoopCategory = "";
   setMode("work");
   syncCategoryState();
-
-  if (isMobileLayout()) {
-    renderCurrentSet();
-    return;
-  }
-
   renderCurrentSet();
 }
 
 function enterPortfolio(category = currentCategory) {
-  if (galleryData[category]) {
-    currentCategory = category;
-    currentMobileSetKey = orderedSetKeys(category)[0] || currentMobileSetKey;
-  }
+  const wasEntryMode = document.body.classList.contains("entry-mode");
+
+  setActiveCategory(category, { sync: false });
 
   setMode("work");
-  renderCurrentSet();
+  renderCurrentSet({ suppressIntro: wasEntryMode });
   document.body.classList.remove("entry-mode");
   entryView?.setAttribute("aria-hidden", "true");
 }
@@ -1017,9 +1095,7 @@ function syncCategoryFromScroll() {
   }
 
   if (category && category !== currentCategory) {
-    currentCategory = category;
-    syncCategoryMenu();
-    syncCategoryState();
+    setActiveCategory(category);
   }
 
   hydrateContactSheet(activeSheet);
@@ -1031,14 +1107,10 @@ function stepCategory(direction) {
   if (sheetLoopLock || sheetSnapLock) return;
 
   if (isMobileLayout()) {
-    const category = currentCategory;
-    const setKeys = orderedSetKeys(category);
+    const setKeys = orderedSetKeys(currentCategory);
     if (!setKeys.length) return;
 
-    const currentIndex = setKeys.indexOf(currentMobileSetKey);
-    const nextIndex = ((currentIndex + direction) % setKeys.length + setKeys.length) % setKeys.length;
-    currentMobileSetKey = setKeys[nextIndex];
-    currentCategory = category;
+    currentMobileSetKey = shiftedValue(setKeys, currentMobileSetKey, direction);
     pendingLoopCategory = "";
     syncCategoryMenu();
     syncCategoryState();
@@ -1047,13 +1119,7 @@ function stepCategory(direction) {
   }
 
   const categories = orderedCategories();
-  const currentIndex = categories.indexOf(currentCategory);
-  const nextIndex = ((currentIndex + direction) % categories.length + categories.length) % categories.length;
-  currentCategory = categories[nextIndex];
-  currentMobileSetKey = orderedSetKeys(currentCategory)[0] || "";
-  pendingLoopCategory = "";
-  syncCategoryMenu();
-  syncCategoryState();
+  setActiveCategory(shiftedValue(categories, currentCategory, direction));
   renderCurrentSet();
 }
 
@@ -1087,14 +1153,26 @@ function stepMobileUniverse(direction) {
   if (!isMobileLayout() || sheetLoopLock || sheetSnapLock) return;
 
   const categories = orderedCategories();
-  const currentIndex = categories.indexOf(currentCategory);
-  const nextIndex = ((currentIndex + direction) % categories.length + categories.length) % categories.length;
-  currentCategory = categories[nextIndex];
-  currentMobileSetKey = orderedSetKeys(currentCategory)[0] || "";
+  setActiveCategory(shiftedValue(categories, currentCategory, direction));
+  renderCurrentSet();
+}
+
+function startSheetLoop(category, cloneSheet) {
+  sheetLoopLock = true;
+  currentCategory = category;
+  pendingLoopCategory = category;
+  syncCategoryState();
+  syncCategoryMenu();
+  scrollToSheet(cloneSheet);
+}
+
+function finishSheetLoop() {
+  currentCategory = pendingLoopCategory;
   pendingLoopCategory = "";
   syncCategoryMenu();
   syncCategoryState();
-  renderCurrentSet();
+  snapToCategory(currentCategory);
+  sheetLoopLock = false;
 }
 
 function loopSheetFromEdge(delta) {
@@ -1111,19 +1189,9 @@ function loopSheetFromEdge(delta) {
   const atEnd = lastReal && gallery.scrollLeft >= sheetScrollLeft(lastReal) - 2;
 
   if (delta < 0 && atStart) {
-    sheetLoopLock = true;
-    currentCategory = categories[categories.length - 1];
-    pendingLoopCategory = currentCategory;
-    syncCategoryState();
-    syncCategoryMenu();
-    scrollToSheet(leadingClone);
+    startSheetLoop(categories[categories.length - 1], leadingClone);
   } else if (delta > 0 && atEnd) {
-    sheetLoopLock = true;
-    currentCategory = categories[0];
-    pendingLoopCategory = currentCategory;
-    syncCategoryState();
-    syncCategoryMenu();
-    scrollToSheet(trailingClone);
+    startSheetLoop(categories[0], trailingClone);
   } else {
     return false;
   }
@@ -1146,21 +1214,11 @@ function normalizeCloneScroll() {
   const trailingReached = gallery.scrollLeft >= sheetScrollLeft(trailingClone) - snapTolerance;
 
   if (pendingLoopCategory === lastReal.dataset.category && leadingReached) {
-    currentCategory = pendingLoopCategory;
-    pendingLoopCategory = "";
-    syncCategoryMenu();
-    syncCategoryState();
-    snapToCategory(currentCategory);
-    sheetLoopLock = false;
+    finishSheetLoop();
   }
 
   if (pendingLoopCategory === firstReal.dataset.category && trailingReached) {
-    currentCategory = pendingLoopCategory;
-    pendingLoopCategory = "";
-    syncCategoryMenu();
-    syncCategoryState();
-    snapToCategory(currentCategory);
-    sheetLoopLock = false;
+    finishSheetLoop();
   }
 }
 
@@ -1334,7 +1392,7 @@ function applyLayoutEdits() {
   });
 }
 
-categoryItems.forEach((item) => {
+CATEGORY_BUTTONS.forEach((item) => {
   item.addEventListener("click", () => {
     if (document.body.classList.contains("entry-mode")) {
       enterPortfolio(item.dataset.category);
@@ -1369,16 +1427,9 @@ highResImageViewer.addEventListener("click", (event) => {
   }
 });
 
-highResImage.addEventListener("click", (event) => {
-  event.stopPropagation();
-  const rect = highResImage.getBoundingClientRect();
-  const direction = event.clientX > rect.left + rect.width / 2 ? 1 : -1;
-  stepHighResImage(direction);
-});
-
-highResClose?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
+highResImageStrip?.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) return;
+  if (event.target.tagName.toLowerCase() === "img") return;
   closeHighResImage();
 });
 
@@ -1389,17 +1440,113 @@ highResImageViewer.addEventListener(
     if (Math.abs(event.deltaX) < 4 && Math.abs(event.deltaY) < 4) return;
 
     event.preventDefault();
-    if (wheelLock) return;
-
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    wheelLock = true;
-    stepHighResImage(delta > 0 ? 1 : -1);
-
-    window.setTimeout(() => {
-      wheelLock = false;
-    }, 260);
+    highResImageViewer.scrollBy({
+      left: normalizedWheelDelta(event),
+      top: 0,
+      behavior: "auto"
+    });
   },
   { passive: false }
+);
+
+highResImageViewer.addEventListener("scroll", () => {
+  if (!highResImageActive || !highResImageStrip) return;
+
+  const frames = Array.from(highResImageStrip.querySelectorAll(".high-res-image-frame"));
+  if (!frames.length) return;
+
+  const viewerCenter = highResViewerCenter();
+  const closestFrame = frames.reduce((nearest, frame) => {
+    const center = highResFrameCenter(frame);
+    const distance = Math.abs(center - viewerCenter);
+    return !nearest || distance < nearest.distance ? { frame, distance } : nearest;
+  }, null)?.frame;
+
+  if (!closestFrame) return;
+  const nextIndex = Number(closestFrame.dataset.index || 0);
+  if (Number.isFinite(nextIndex)) {
+    highResImageIndex = nextIndex;
+  }
+});
+
+highResImageViewer.addEventListener(
+  "touchstart",
+  (event) => {
+    if (!highResImageActive || !isMobileLayout()) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    highResGestureStart = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+      leftEdge: touch.clientX <= 24,
+      rightEdge: touch.clientX >= window.innerWidth - 24
+    };
+  },
+  { passive: true }
+);
+
+highResImageViewer.addEventListener(
+  "touchmove",
+  (event) => {
+    if (!highResImageActive || !isMobileLayout() || !highResGestureStart) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    const dx = touch.clientX - highResGestureStart.x;
+    const dy = touch.clientY - highResGestureStart.y;
+    const horizontalSwipe = Math.abs(dx) > Math.abs(dy) * 1.1;
+    const blockingBackNav = highResGestureStart.leftEdge && dx > 8;
+    const blockingForwardNav = highResGestureStart.rightEdge && dx < -8;
+    if (horizontalSwipe && (blockingBackNav || blockingForwardNav)) {
+      event.preventDefault();
+    }
+  },
+  { passive: false }
+);
+
+highResImageViewer.addEventListener(
+  "touchend",
+  (event) => {
+    if (!highResImageActive || !isMobileLayout() || !highResGestureStart) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+
+    const dx = touch.clientX - highResGestureStart.x;
+    const dy = touch.clientY - highResGestureStart.y;
+    const elapsed = Date.now() - highResGestureStart.time;
+    highResGestureStart = null;
+
+    if (elapsed > 900) return;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    if (dy > 56 && absY > absX * 1.25) {
+      closeHighResImage();
+      return;
+    }
+
+    const horizontalGesture = absX > 72 && absX > absY * 1.2;
+    if (!horizontalGesture) return;
+
+    const maxScrollLeft = Math.max(0, highResImageViewer.scrollWidth - highResImageViewer.clientWidth);
+    const atStart = highResImageViewer.scrollLeft <= 1 || highResImageIndex <= 0;
+    const atEnd = highResImageViewer.scrollLeft >= maxScrollLeft - 1 || highResImageIndex >= currentHighResSetImages().length - 1;
+
+    if ((dx > 0 && atStart) || (dx < 0 && atEnd)) {
+      closeHighResImage();
+    }
+  },
+  { passive: true }
+);
+
+highResImageViewer.addEventListener(
+  "touchcancel",
+  () => {
+    highResGestureStart = null;
+  },
+  { passive: true }
 );
 
 brand?.addEventListener("click", (event) => {
@@ -1410,18 +1557,8 @@ brand?.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  const handledOverlayKeys = new Set([
-    "Escape",
-    "ArrowRight",
-    "ArrowDown",
-    "PageDown",
-    "ArrowLeft",
-    "ArrowUp",
-    "PageUp"
-  ]);
-
   if (document.body.classList.contains("entry-mode")) {
-    if (handledOverlayKeys.has(event.key) || event.key === "Enter" || event.key === " ") {
+    if (OVERLAY_KEYS.has(event.key) || event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       enterPortfolio(currentCategory);
     }
@@ -1430,7 +1567,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (highResImageActive) {
-    if (handledOverlayKeys.has(event.key)) {
+    if (OVERLAY_KEYS.has(event.key)) {
       event.preventDefault();
     }
 
@@ -1570,7 +1707,7 @@ workView.addEventListener(
     if (Math.max(absX, absY) < threshold) return;
 
     if (absX >= absY * 1.25) {
-      stepCategory(dx > 0 ? -1 : 1);
+      stepMobileUniverse(dx > 0 ? -1 : 1);
     }
   },
   { passive: true }
