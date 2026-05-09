@@ -2,8 +2,7 @@ const portfolioData = {
   galleryData: window.galleryData,
   contactLayouts: window.contactLayouts,
   freeContactLayouts: window.freeContactLayouts,
-  defaultLayoutEdits: window.defaultLayoutEdits,
-  defaultOpenLayoutEdits: window.defaultOpenLayoutEdits
+  defaultLayoutEdits: window.defaultLayoutEdits
 };
 
 if (!portfolioData.galleryData || !portfolioData.contactLayouts || !portfolioData.freeContactLayouts) {
@@ -14,27 +13,22 @@ const {
   galleryData,
   contactLayouts,
   freeContactLayouts,
-  defaultLayoutEdits,
-  defaultOpenLayoutEdits
+  defaultLayoutEdits
 } = portfolioData;
 
 const gallery = document.getElementById("gallery");
+const entryView = document.getElementById("entry-view");
+const entryItems = document.querySelectorAll(".entry-nav-item");
 const brand = document.querySelector(".brand");
-const infoToggle = brand;
 const workView = document.getElementById("work-view");
-const infoView = document.getElementById("info-view");
 const categoryItems = document.querySelectorAll(".category-item");
-const fullscreenSetViewer = document.getElementById("fullscreen-set-viewer");
-const fullscreenSetContent = fullscreenSetViewer.querySelector(".fullscreen-set-content");
-const fullscreenNavPrev = document.getElementById("fullscreen-nav-prev");
-const fullscreenNavNext = document.getElementById("fullscreen-nav-next");
-const fullscreenClose = document.getElementById("fullscreen-close");
 const highResImageViewer = document.getElementById("high-res-image-viewer");
 const highResImage = highResImageViewer.querySelector("img");
-const highResNavPrev = document.getElementById("high-res-nav-prev");
-const highResNavNext = document.getElementById("high-res-nav-next");
 const highResClose = document.getElementById("high-res-close");
 const mobileProgressFill = document.querySelector(".mobile-progress-fill");
+const mobilePrevSetButton = document.getElementById("mobile-prev-set");
+const mobileNextSetButton = document.getElementById("mobile-next-set");
+const mobileSetIndicator = document.getElementById("mobile-set-indicator");
 
 let currentCategory = "portraits";
 let currentMobileSetKey = "SET1";
@@ -44,9 +38,8 @@ let resizeFrame = 0;
 let sheetLoopLock = false;
 let sheetSnapLock = false;
 let pendingLoopCategory = "";
-let fullscreenSetActive = false;
-let fullscreenSetCategory = "portraits";
-let fullscreenSetKey = "SET1";
+let highResSetCategory = "portraits";
+let highResSetKey = "SET1";
 let highResImageActive = false;
 let highResImageIndex = 0;
 let contactSheetObserver = null;
@@ -241,6 +234,7 @@ function syncCategoryMenu() {
 
   categoryItems.forEach((entry) => {
     const isActive = isWork && entry.dataset.category === currentCategory;
+
     entry.classList.toggle("is-active", isActive);
 
     if (isActive) {
@@ -258,12 +252,14 @@ function syncMobileProgress() {
 
   if (!isMobileLayout() || workView.classList.contains("is-hidden")) {
     mobileProgressFill.style.transform = "scaleX(0)";
+    syncMobileDock();
     return;
   }
 
   const setKeys = orderedSetKeys(currentCategory);
   if (!setKeys.length) {
     mobileProgressFill.style.transform = "scaleX(0)";
+    syncMobileDock();
     return;
   }
 
@@ -271,6 +267,42 @@ function syncMobileProgress() {
   const progress = (currentIndex + 1) / setKeys.length;
   mobileProgressFill.style.transform = `scaleX(${Math.max(0.02, progress)})`;
   mobileProgressFill.dataset.label = `${currentIndex + 1}/${setKeys.length}`;
+  syncMobileDock();
+}
+
+function categoryLabelFor(category) {
+  const match = Array.from(categoryItems).find((item) => item.dataset.category === category);
+  return match?.textContent?.trim() || category;
+}
+
+function syncMobileDock() {
+  if (!mobileSetIndicator || !mobilePrevSetButton || !mobileNextSetButton) return;
+
+  const active = isMobileLayout() && !workView.classList.contains("is-hidden");
+  if (!active) {
+    mobileSetIndicator.textContent = "";
+    mobilePrevSetButton.disabled = true;
+    mobileNextSetButton.disabled = true;
+    return;
+  }
+
+  const setKeys = orderedSetKeys(currentCategory);
+  if (!setKeys.length) {
+    mobileSetIndicator.textContent = "";
+    mobilePrevSetButton.disabled = true;
+    mobileNextSetButton.disabled = true;
+    return;
+  }
+
+  const currentIndex = Math.max(0, setKeys.indexOf(currentMobileSetKey));
+  const total = setKeys.length;
+  const navDisabled = total <= 1;
+
+  mobileSetIndicator.textContent = `${categoryLabelFor(currentCategory)} ${currentIndex + 1}/${total}`;
+  mobilePrevSetButton.disabled = navDisabled;
+  mobileNextSetButton.disabled = navDisabled;
+  mobilePrevSetButton.setAttribute("aria-label", `Previous ${categoryLabelFor(currentCategory)} set`);
+  mobileNextSetButton.setAttribute("aria-label", `Next ${categoryLabelFor(currentCategory)} set`);
 }
 
 function createContactSheet(category, options = {}) {
@@ -397,9 +429,6 @@ function createFreeContactFrame({ category, setKey, src, imageIndex, setIndex, s
   item.addEventListener("mouseenter", () => {
     setHoveredSet(sheet, setKey);
   });
-  item.addEventListener("click", () => {
-    openFullscreenSet(category, setKey);
-  });
 
   const img = document.createElement("img");
   applyResponsivePreview(img, src, { mode: "grid" });
@@ -497,9 +526,6 @@ function createContactSet({ category, setKey, images, chunk, chunkIndex, rowInde
   setGroup.addEventListener("mouseenter", () => {
     setHoveredSet(sheet, setKey);
   });
-  setGroup.addEventListener("click", () => {
-    openFullscreenSet(category, setKey);
-  });
 
   chunk.forEach(({ src, imageIndex }) => {
     const item = document.createElement("figure");
@@ -520,9 +546,6 @@ function createContactSet({ category, setKey, images, chunk, chunkIndex, rowInde
 
     item.addEventListener("mouseenter", () => {
       setHoveredSet(sheet, setKey);
-    });
-    item.addEventListener("click", () => {
-      openFullscreenSet(category, setKey);
     });
 
     const img = document.createElement("img");
@@ -591,8 +614,8 @@ function observeContactSheets() {
 function renderCurrentSet() {
   gallery.innerHTML = "";
   gallery.className = isMobileLayout()
-    ? "gallery mobile-slides mobile-layout"
-    : "gallery contact-sheets";
+    ? "gallery mobile-feed mobile-layout"
+    : "gallery portfolio-grid";
 
   if (isMobileLayout()) {
     const categories = orderedCategories();
@@ -603,31 +626,28 @@ function renderCurrentSet() {
       currentMobileSetKey = setKeys[0] || "";
     }
 
-    if (!category || !currentMobileSetKey) return;
+    if (!category || !setKeys.length) return;
 
     syncCategoryMenu();
-    gallery.appendChild(createMobileSlide(category, currentMobileSetKey));
-    syncCategoryState();
-    return;
-  } else {
-    const categories = orderedCategories();
-    gallery.appendChild(createContactSheet(categories[categories.length - 1], { clone: true, hydrate: false }));
-    categories.forEach((category) => {
-      gallery.appendChild(createContactSheet(category, { hydrate: category === currentCategory }));
+    setKeys.forEach((setKey) => {
+      gallery.appendChild(createMobileSetCard(category, setKey));
     });
-    gallery.appendChild(createContactSheet(categories[0], { clone: true, hydrate: false }));
+    syncCategoryState();
+
+    window.requestAnimationFrame(() => {
+      scrollMobileSetIntoView(currentMobileSetKey, "auto");
+      syncMobileSetFromScroll();
+    });
+    return;
   }
 
+  orderedSetKeys(currentCategory).forEach((setKey) => {
+    gallery.appendChild(createPortfolioSetCard(currentCategory, setKey));
+  });
+  gallery.scrollTop = 0;
   syncCategoryState();
   window.requestAnimationFrame(() => {
-    if (isMobileLayout()) {
-      syncCategoryState();
-      return;
-    }
-    syncContactSheetGrid();
-    applyLayoutEdits();
-    observeContactSheets();
-    snapToCategory(currentCategory);
+    syncCategoryState();
   });
 }
 
@@ -635,188 +655,12 @@ function setIndexFor(category, setKey) {
   return categorySets(category).findIndex(([key]) => key === setKey);
 }
 
-function sourceFramesForSet(category, setKey) {
-  const sheet = document.getElementById(`sheet-${category}`);
-  if (!sheet) return [];
-
-  return Array.from(sheet.querySelectorAll(`.contact-frame[data-set-key="${setKey}"]`))
-    .sort((a, b) => Number(a.dataset.index || 0) - Number(b.dataset.index || 0));
-}
-
-function setFullscreenFrameEdit(frame, edit = {}) {
-  const rawX = Math.round(edit.x || 0);
-  const rawY = Math.round(edit.y || 0);
-  const rawScale = Math.min(3.9, Math.max(0.25, Number(edit.scale || 1)));
-
-  frame.dataset.openEditX = String(rawX);
-  frame.dataset.openEditY = String(rawY);
-  frame.dataset.openScale = String(rawScale);
-  setPixelPositionVars(frame, "--open-edit-x", "--open-edit-y", rawX, rawY);
-  frame.style.setProperty("--open-scale", String(rawScale));
-}
-
-function buildFullscreenFromSourceFrames(category, setKey, images) {
-  const openEdits = readOpenLayoutEdits();
-  const sourceFrames = sourceFramesForSet(category, setKey);
-  if (!sourceFrames.length) return false;
-
-  const frameRects = sourceFrames
-    .map((frame) => ({ frame, rect: frame.getBoundingClientRect() }))
-    .filter(({ rect }) => rect.width > 0 && rect.height > 0);
-  if (!frameRects.length) return false;
-
-  const minX = Math.min(...frameRects.map(({ rect }) => rect.left));
-  const minY = Math.min(...frameRects.map(({ rect }) => rect.top));
-  const maxX = Math.max(...frameRects.map(({ rect }) => rect.right));
-  const maxY = Math.max(...frameRects.map(({ rect }) => rect.bottom));
-  const layoutWidth = Math.max(1, Math.round(maxX - minX));
-  const layoutHeight = Math.max(1, Math.round(maxY - minY));
-
-  const stage = document.createElement("section");
-  stage.className = "fullscreen-set-stage";
-  stage.style.setProperty("--fullscreen-layout-width", `${layoutWidth}px`);
-  stage.style.setProperty("--fullscreen-layout-height", `${layoutHeight}px`);
-
-  const boundsWidth = Math.max(1, fullscreenSetContent.clientWidth);
-  const boundsHeight = Math.max(1, fullscreenSetContent.clientHeight);
-  const scale = Math.min(boundsWidth / layoutWidth, boundsHeight / layoutHeight) * 0.98;
-  stage.style.setProperty("--fullscreen-layout-scale", String(scale));
-
-  frameRects.forEach(({ frame, rect }) => {
-    const item = frame.cloneNode(true);
-    item.classList.remove("free-contact-frame", "is-set-hovered", "is-selected", "is-dragging");
-    item.classList.add("fullscreen-set-item", "fullscreen-set-frame", "fullscreen-editable-frame");
-    item.style.left = `${Math.round(rect.left - minX)}px`;
-    item.style.top = `${Math.round(rect.top - minY)}px`;
-    item.style.width = `${Math.round(rect.width)}px`;
-    item.style.height = `${Math.round(rect.height)}px`;
-
-    const imageIndex = Math.max(0, Number(frame.dataset.index || 1) - 1);
-    const sourcePath = images[imageIndex];
-    item.dataset.openLayoutKey = openLayoutKey(category, setKey, imageIndex + 1);
-    const img = item.querySelector("img");
-    if (img && sourcePath) {
-      applyResponsivePreview(img, sourcePath, { mode: "set" });
-      img.alt = fileName(sourcePath);
-      img.loading = "eager";
-      img.decoding = "async";
-      img.addEventListener("load", fitFullscreenSetLayout);
-      img.addEventListener("click", (event) => {
-        event.stopPropagation();
-        openHighResImage(imageIndex);
-      });
-    }
-
-    setFullscreenFrameEdit(item, openEdits[item.dataset.openLayoutKey]);
-    stage.appendChild(item);
-  });
-
-  fullscreenSetContent.appendChild(stage);
-  return true;
-}
-
-function fitFullscreenSetLayout() {
-  const shell = fullscreenSetContent.querySelector(".set-layout-shell");
-  if (!shell) return;
-  const group = shell.querySelector(".set-group");
-  if (!group) return;
-
-  shell.style.setProperty("--set-layout-scale", "1");
-  const contentWidth = group.offsetWidth;
-  const contentHeight = group.offsetHeight;
-  const boundsWidth = Math.max(1, fullscreenSetContent.clientWidth);
-  const boundsHeight = Math.max(1, fullscreenSetContent.clientHeight);
-
-  if (!contentWidth || !contentHeight) return;
-
-  const scale = Math.min(boundsWidth / contentWidth, boundsHeight / contentHeight, 1);
-  shell.style.setProperty("--set-layout-scale", String(scale));
-}
-
-function renderFullscreenSet(category, setKey) {
-  const setEntry = galleryData[category]?.[setKey];
-  if (!setEntry) return [];
-  const openEdits = readOpenLayoutEdits();
-
-  fullscreenSetContent.innerHTML = "";
-
-  if (buildFullscreenFromSourceFrames(category, setKey, setEntry)) {
-    return [];
-  }
-
-  const shell = document.createElement("section");
-  shell.className = "set-layout-shell";
-
-  const group = document.createElement("section");
-  group.className = "set-group";
-
-  const grid = document.createElement("div");
-  grid.className = `set-grid ${layoutClassForSet(setEntry)}`;
-  grid.style.setProperty("--set-columns", String(setEntry.length === 4 ? 2 : 1));
-  const imgElements = [];
-
-  setEntry.forEach((src, imageIndex) => {
-    const item = document.createElement("figure");
-    item.className = "gallery-item fullscreen-set-item fullscreen-editable-frame";
-    item.dataset.index = String(imageIndex + 1);
-    item.dataset.openLayoutKey = openLayoutKey(category, setKey, imageIndex + 1);
-    setFullscreenFrameEdit(item, openEdits[item.dataset.openLayoutKey]);
-
-    const img = document.createElement("img");
-    applyResponsivePreview(img, src, { mode: "set" });
-    img.alt = fileName(src);
-    img.loading = "eager";
-    img.decoding = "async";
-    img.addEventListener("load", fitFullscreenSetLayout);
-    img.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openHighResImage(imageIndex);
-    });
-    imgElements.push(img);
-
-    item.appendChild(img);
-    grid.appendChild(item);
-  });
-
-  maybePromoteToTriptych(grid, setEntry, imgElements);
-  maybeAdjustTwoImageLayout(grid, setEntry, imgElements);
-
-  group.appendChild(grid);
-  shell.appendChild(group);
-  fullscreenSetContent.appendChild(shell);
-  window.requestAnimationFrame(fitFullscreenSetLayout);
-
-  return imgElements;
-}
-
-function openFullscreenSet(category, setKey) {
-  if (!galleryData[category]?.[setKey]) return;
-
-  fullscreenSetActive = true;
-  fullscreenSetCategory = category;
-  fullscreenSetKey = setKey;
-  currentCategory = category;
-  fullscreenSetViewer.classList.add("is-active");
-  fullscreenSetViewer.setAttribute("aria-hidden", "false");
-  document.body.classList.add("fullscreen-set-mode");
-  renderFullscreenSet(category, setKey);
-}
-
-function closeFullscreenSet() {
-  closeHighResImage();
-  fullscreenSetActive = false;
-  fullscreenSetViewer.classList.remove("is-active");
-  fullscreenSetViewer.setAttribute("aria-hidden", "true");
-  document.body.classList.remove("fullscreen-set-mode");
-  fullscreenSetContent.innerHTML = "";
-}
-
-function currentFullscreenSetImages() {
-  return galleryData[fullscreenSetCategory]?.[fullscreenSetKey] || [];
+function currentHighResSetImages() {
+  return galleryData[highResSetCategory]?.[highResSetKey] || [];
 }
 
 function renderHighResImage() {
-  const images = currentFullscreenSetImages();
+  const images = currentHighResSetImages();
   const src = images[highResImageIndex];
   if (!src) return;
 
@@ -825,7 +669,7 @@ function renderHighResImage() {
 }
 
 function openHighResImage(index) {
-  const images = currentFullscreenSetImages();
+  const images = currentHighResSetImages();
   if (!images.length) return;
 
   highResImageActive = true;
@@ -848,21 +692,11 @@ function closeHighResImage() {
 }
 
 function stepHighResImage(direction) {
-  const images = currentFullscreenSetImages();
+  const images = currentHighResSetImages();
   if (!images.length) return;
 
   highResImageIndex = ((highResImageIndex + direction) % images.length + images.length) % images.length;
   renderHighResImage();
-}
-
-function stepFullscreenSet(direction) {
-  const sets = categorySets(fullscreenSetCategory);
-  if (!sets.length) return;
-
-  const currentIndex = setIndexFor(fullscreenSetCategory, fullscreenSetKey);
-  const nextIndex = ((currentIndex + direction) % sets.length + sets.length) % sets.length;
-  fullscreenSetKey = sets[nextIndex][0];
-  renderFullscreenSet(fullscreenSetCategory, fullscreenSetKey);
 }
 
 function setHoveredSet(sheet, setKey) {
@@ -916,8 +750,8 @@ function createMobileSlide(category, setKey) {
     frame.className = "mobile-slide-frame";
     frame.dataset.index = String(imageIndex + 1);
     const openFrame = () => {
-      fullscreenSetCategory = category;
-      fullscreenSetKey = setKey;
+      highResSetCategory = category;
+      highResSetKey = setKey;
       currentCategory = category;
       currentMobileSetKey = setKey;
       openHighResImage(imageIndex);
@@ -957,6 +791,115 @@ function createMobileSlide(category, setKey) {
 
   slide.appendChild(stack);
   return slide;
+}
+
+function createMobileSetCard(category, setKey) {
+  return createPortfolioSetCard(category, setKey, { mobile: true });
+}
+
+function createPortfolioSetCard(category, setKey, options = {}) {
+  const card = document.createElement("article");
+  card.className = options.mobile ? "portfolio-set-card mobile-set-card" : "portfolio-set-card";
+  card.dataset.category = category;
+  card.dataset.setKey = setKey;
+  card.id = mobileSlideId(category, setKey);
+
+  const images = galleryData[category]?.[setKey] || [];
+  const header = document.createElement("button");
+  header.className = options.mobile ? "portfolio-set-header mobile-set-header" : "portfolio-set-header";
+  header.type = "button";
+  header.tabIndex = -1;
+  header.setAttribute("aria-hidden", "true");
+
+  const label = document.createElement("span");
+  label.textContent = categoryLabelFor(category);
+
+  const count = document.createElement("span");
+  count.textContent = "";
+  count.setAttribute("aria-hidden", "true");
+
+  header.append(label, count);
+
+  const grid = document.createElement("div");
+  grid.className = options.mobile ? "portfolio-set-grid mobile-set-grid" : "portfolio-set-grid";
+  grid.dataset.count = String(images.length);
+  grid.style.setProperty("--set-card-count", String(Math.max(1, images.length)));
+  grid.style.setProperty("--mobile-set-count", String(Math.max(1, images.length)));
+
+  images.forEach((src, imageIndex) => {
+    const frame = document.createElement("figure");
+    frame.className = options.mobile ? "portfolio-set-frame mobile-set-frame" : "portfolio-set-frame";
+    frame.dataset.index = String(imageIndex + 1);
+
+    frame.addEventListener("click", (event) => {
+      event.preventDefault();
+      highResSetCategory = category;
+      highResSetKey = setKey;
+      currentCategory = category;
+      currentMobileSetKey = setKey;
+      openHighResImage(imageIndex);
+      syncCategoryMenu();
+      syncCategoryState();
+    });
+
+    const img = document.createElement("img");
+    applyResponsivePreview(img, src, { mode: "set" });
+    img.alt = fileName(src);
+    img.loading = imageIndex === 0 ? "eager" : "lazy";
+    img.decoding = "async";
+    frame.appendChild(img);
+    grid.appendChild(frame);
+  });
+
+  card.append(header, grid);
+  return card;
+}
+
+function mobileSetCards() {
+  return Array.from(gallery.querySelectorAll(".mobile-set-card"));
+}
+
+function scrollMobileSetIntoView(setKey, behavior = "smooth") {
+  const card = gallery.querySelector(`.mobile-set-card[data-set-key="${setKey}"]`);
+  if (!card) return;
+
+  gallery.scrollTo({ top: card.offsetTop, left: 0, behavior });
+}
+
+function portfolioSetCards() {
+  return Array.from(gallery.querySelectorAll(".portfolio-set-card"));
+}
+
+function activePortfolioSetKey() {
+  const cards = portfolioSetCards();
+  if (!cards.length) return currentMobileSetKey;
+
+  const viewportAnchor = gallery.scrollTop + Math.max(1, gallery.clientHeight) * 0.42;
+  const activeCard = cards.reduce((nearest, card) => {
+    const cardAnchor = card.offsetTop + card.offsetHeight * 0.5;
+    const distance = Math.abs(cardAnchor - viewportAnchor);
+    return !nearest || distance < nearest.distance ? { card, distance } : nearest;
+  }, null)?.card;
+
+  return activeCard?.dataset.setKey || currentMobileSetKey;
+}
+
+function stepSetInCurrentCategory(direction) {
+  const setKeys = orderedSetKeys(currentCategory);
+  if (!setKeys.length) return;
+
+  const activeSetKey = activePortfolioSetKey();
+  const currentIndex = Math.max(0, setKeys.indexOf(activeSetKey));
+  const nextIndex = clamp(currentIndex + direction, 0, setKeys.length - 1);
+  const nextSetKey = setKeys[nextIndex];
+  if (!nextSetKey) return;
+
+  currentMobileSetKey = nextSetKey;
+  const card = gallery.querySelector(`.portfolio-set-card[data-set-key="${nextSetKey}"]`);
+  if (card) {
+    gallery.scrollTo({ top: card.offsetTop, left: 0, behavior: "smooth" });
+  }
+  syncMobileProgress();
 }
 
 function realSheets() {
@@ -1018,15 +961,35 @@ function setCategory(category) {
     return;
   }
 
-  const target = document.getElementById(`sheet-${category}`);
-  hydrateContactSheet(target);
-  syncContactSheetGrid();
-  applyLayoutEdits();
-  scrollToSheet(target);
+  renderCurrentSet();
+}
+
+function enterPortfolio(category = currentCategory) {
+  if (galleryData[category]) {
+    currentCategory = category;
+    currentMobileSetKey = orderedSetKeys(category)[0] || currentMobileSetKey;
+  }
+
+  setMode("work");
+  renderCurrentSet();
+  document.body.classList.remove("entry-mode");
+  entryView?.setAttribute("aria-hidden", "true");
+}
+
+function showEntry() {
+  closeHighResImage();
+  setMode("work");
+  document.body.classList.add("entry-mode");
+  entryView?.setAttribute("aria-hidden", "false");
 }
 
 function syncCategoryFromScroll() {
   if (!gallery || workView.classList.contains("is-hidden") || sheetLoopLock || sheetSnapLock) return;
+
+  if (isMobileLayout()) {
+    syncMobileSetFromScroll();
+    return;
+  }
 
   const sheets = realSheets();
   if (!sheets.length) return;
@@ -1079,44 +1042,45 @@ function stepCategory(direction) {
     pendingLoopCategory = "";
     syncCategoryMenu();
     syncCategoryState();
-    renderCurrentSet();
+    scrollMobileSetIntoView(currentMobileSetKey);
     return;
   }
 
   const categories = orderedCategories();
   const currentIndex = categories.indexOf(currentCategory);
   const nextIndex = ((currentIndex + direction) % categories.length + categories.length) % categories.length;
-
-  const firstReal = document.getElementById(`sheet-${categories[0]}`);
-  const lastReal = document.getElementById(`sheet-${categories[categories.length - 1]}`);
-  const leadingClone = gallery.querySelector(".contact-sheet[data-clone='true']:first-child");
-  const trailingClone = gallery.querySelector(".contact-sheet[data-clone='true']:last-child");
-
-  if (direction < 0 && currentIndex === 0 && firstReal && leadingClone) {
-    sheetLoopLock = true;
-    currentCategory = categories[categories.length - 1];
-    pendingLoopCategory = currentCategory;
-    syncCategoryMenu();
-    syncCategoryState();
-    scrollToSheet(leadingClone);
-    return;
-  }
-
-  if (direction > 0 && currentIndex === categories.length - 1 && lastReal && trailingClone) {
-    sheetLoopLock = true;
-    currentCategory = categories[0];
-    pendingLoopCategory = currentCategory;
-    syncCategoryMenu();
-    syncCategoryState();
-    scrollToSheet(trailingClone);
-    return;
-  }
-
   currentCategory = categories[nextIndex];
+  currentMobileSetKey = orderedSetKeys(currentCategory)[0] || "";
   pendingLoopCategory = "";
   syncCategoryMenu();
   syncCategoryState();
-  scrollToSheet(realSheets()[nextIndex]);
+  renderCurrentSet();
+}
+
+function syncMobileSetFromScroll() {
+  if (!isMobileLayout()) return;
+
+  const cards = mobileSetCards();
+  if (!cards.length) {
+    syncMobileProgress();
+    return;
+  }
+
+  const galleryTop = gallery.scrollTop;
+  const viewportAnchor = galleryTop + Math.max(1, gallery.clientHeight) * 0.38;
+  const activeCard = cards.reduce((nearest, card) => {
+    const cardAnchor = card.offsetTop + Math.min(card.offsetHeight * 0.5, 220);
+    const distance = Math.abs(cardAnchor - viewportAnchor);
+    return !nearest || distance < nearest.distance ? { card, distance } : nearest;
+  }, null)?.card;
+
+  const setKey = activeCard?.dataset.setKey;
+  if (setKey && setKey !== currentMobileSetKey) {
+    currentMobileSetKey = setKey;
+  }
+
+  syncCategoryMenu();
+  syncCategoryState();
 }
 
 function stepMobileUniverse(direction) {
@@ -1221,28 +1185,18 @@ function handleResize() {
       syncContactSheetGrid();
       snapToCategory(currentCategory);
     }
-    if (fullscreenSetActive) {
-      renderFullscreenSet(fullscreenSetCategory, fullscreenSetKey);
-    }
   });
 }
 
 function setMode(mode) {
   const isWork = mode === "work";
-  brand.textContent = isWork ? "Elie Benchimol" : "photos";
-  infoToggle.classList.toggle("is-active", !isWork);
+  brand.textContent = "Elie Benchimol";
   workView.classList.toggle("is-hidden", !isWork);
-  infoView.classList.toggle("is-hidden", isWork);
-  document.body.classList.toggle("info-mode", !isWork);
   syncCategoryMenu();
 }
 
 function layoutKey(category, setKey, chunkIndex, imageIndex = "") {
   return [category, setKey, chunkIndex, imageIndex].filter(Boolean).join(".");
-}
-
-function openLayoutKey(category, setKey, imageIndex) {
-  return [category, setKey, imageIndex].join(".");
 }
 
 function normalizeLayoutEdits(value) {
@@ -1257,42 +1211,6 @@ function normalizeLayoutEdits(value) {
   };
 }
 
-function normalizeOpenLayoutEdits(value) {
-  if (!value || typeof value !== "object") {
-    return {};
-  }
-
-  let edits = value;
-
-  while (
-    edits
-    && typeof edits === "object"
-    && !Array.isArray(edits)
-    && Object.prototype.hasOwnProperty.call(edits, "edits")
-    && Object.keys(edits).every((key) => key === "version" || key === "edits")
-  ) {
-    edits = edits.edits;
-  }
-
-  if (!edits || typeof edits !== "object" || Array.isArray(edits)) {
-    return {};
-  }
-
-  const flat = { ...edits };
-  delete flat.version;
-  delete flat.edits;
-  return flat;
-}
-
-function needsOpenLayoutSanitizing(value) {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && (Object.prototype.hasOwnProperty.call(value, "version") || Object.prototype.hasOwnProperty.call(value, "edits"))
-  );
-}
-
 function readStoredLayoutEdits() {
   try {
     const value = JSON.parse(localStorage.getItem("elie-layout-edits") || "{}");
@@ -1300,25 +1218,6 @@ function readStoredLayoutEdits() {
   } catch {
     return { version: LAYOUT_STORAGE_VERSION, sets: {}, images: {} };
   }
-}
-
-function readStoredOpenLayoutEdits() {
-  try {
-    const raw = JSON.parse(localStorage.getItem("elie-open-layout-edits") || "{}");
-    const normalized = normalizeOpenLayoutEdits(raw);
-
-    if (needsOpenLayoutSanitizing(raw)) {
-      writeOpenLayoutEdits(normalized);
-    }
-
-    return normalized;
-  } catch {
-    return {};
-  }
-}
-
-function readOpenLayoutEdits() {
-  return { ...defaultOpenLayoutEdits, ...readStoredOpenLayoutEdits() };
 }
 
 function readLayoutEdits() {
@@ -1336,13 +1235,6 @@ function writeLayoutEdits(edits) {
     version: LAYOUT_STORAGE_VERSION,
     sets: edits.sets || {},
     images: edits.images || {}
-  }));
-}
-
-function writeOpenLayoutEdits(edits) {
-  localStorage.setItem("elie-open-layout-edits", JSON.stringify({
-    version: LAYOUT_STORAGE_VERSION,
-    edits: normalizeOpenLayoutEdits(edits || {})
   }));
 }
 
@@ -1444,33 +1336,31 @@ function applyLayoutEdits() {
 
 categoryItems.forEach((item) => {
   item.addEventListener("click", () => {
+    if (document.body.classList.contains("entry-mode")) {
+      enterPortfolio(item.dataset.category);
+      return;
+    }
+
     setCategory(item.dataset.category);
   });
 });
 
-fullscreenSetViewer.addEventListener("click", (event) => {
-  if (event.target.closest(".fullscreen-hud")) return;
-  if (!event.target.closest(".fullscreen-set-item")) {
-    closeFullscreenSet();
-  }
+entryItems.forEach((item) => {
+  item.addEventListener("click", () => {
+    enterPortfolio(item.dataset.category);
+  });
 });
 
-fullscreenNavPrev?.addEventListener("click", (event) => {
+mobilePrevSetButton?.addEventListener("click", (event) => {
   event.preventDefault();
-  event.stopPropagation();
-  stepFullscreenSet(-1);
+  if (!isMobileLayout()) return;
+  stepCategory(-1);
 });
 
-fullscreenNavNext?.addEventListener("click", (event) => {
+mobileNextSetButton?.addEventListener("click", (event) => {
   event.preventDefault();
-  event.stopPropagation();
-  stepFullscreenSet(1);
-});
-
-fullscreenClose?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  closeFullscreenSet();
+  if (!isMobileLayout()) return;
+  stepCategory(1);
 });
 
 highResImageViewer.addEventListener("click", (event) => {
@@ -1484,18 +1374,6 @@ highResImage.addEventListener("click", (event) => {
   const rect = highResImage.getBoundingClientRect();
   const direction = event.clientX > rect.left + rect.width / 2 ? 1 : -1;
   stepHighResImage(direction);
-});
-
-highResNavPrev?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  stepHighResImage(-1);
-});
-
-highResNavNext?.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  stepHighResImage(1);
 });
 
 highResClose?.addEventListener("click", (event) => {
@@ -1524,30 +1402,11 @@ highResImageViewer.addEventListener(
   { passive: false }
 );
 
-fullscreenSetViewer.addEventListener(
-  "wheel",
-  (event) => {
-    if (!fullscreenSetActive) return;
-    if (Math.abs(event.deltaX) < 4 && Math.abs(event.deltaY) < 4) return;
-
-    event.preventDefault();
-    if (wheelLock) return;
-
-    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-    wheelLock = true;
-    stepFullscreenSet(delta > 0 ? 1 : -1);
-
-    window.setTimeout(() => {
-      wheelLock = false;
-    }, 360);
-  },
-  { passive: false }
-);
-
 brand?.addEventListener("click", (event) => {
   event.preventDefault();
-  const isInfoMode = document.body.classList.contains("info-mode");
-  setMode(isInfoMode ? "work" : "info");
+  if (!document.body.classList.contains("entry-mode")) {
+    showEntry();
+  }
 });
 
 document.addEventListener("keydown", (event) => {
@@ -1560,6 +1419,15 @@ document.addEventListener("keydown", (event) => {
     "ArrowUp",
     "PageUp"
   ]);
+
+  if (document.body.classList.contains("entry-mode")) {
+    if (handledOverlayKeys.has(event.key) || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      enterPortfolio(currentCategory);
+    }
+
+    return;
+  }
 
   if (highResImageActive) {
     if (handledOverlayKeys.has(event.key)) {
@@ -1583,29 +1451,6 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (fullscreenSetActive) {
-    if (handledOverlayKeys.has(event.key)) {
-      event.preventDefault();
-    }
-
-    if (event.key === "Escape") {
-      closeFullscreenSet();
-      return;
-    }
-
-    if (event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === "PageDown") {
-      stepFullscreenSet(1);
-      return;
-    }
-
-    if (event.key === "ArrowLeft" || event.key === "ArrowUp" || event.key === "PageUp") {
-      stepFullscreenSet(-1);
-      return;
-    }
-
-    return;
-  }
-
   if (workView.classList.contains("is-hidden")) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -1616,23 +1461,27 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (isMobileLayout()) {
-    if (event.key === "ArrowRight" || event.key === "PageDown") {
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
       stepMobileUniverse(1);
       return;
     }
 
-    if (event.key === "ArrowLeft" || event.key === "PageUp") {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
       stepMobileUniverse(-1);
       return;
     }
 
-    if (event.key === "ArrowDown") {
-      stepCategory(-1);
+    if (event.key === "ArrowDown" || event.key === "PageDown") {
+      event.preventDefault();
+      stepSetInCurrentCategory(1);
       return;
     }
 
-    if (event.key === "ArrowUp") {
-      stepCategory(1);
+    if (event.key === "ArrowUp" || event.key === "PageUp") {
+      event.preventDefault();
+      stepSetInCurrentCategory(-1);
       return;
     }
 
@@ -1640,19 +1489,23 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (event.key === "ArrowRight") {
+    event.preventDefault();
     stepCategory(1);
   }
 
   if (event.key === "ArrowLeft") {
+    event.preventDefault();
     stepCategory(-1);
   }
 
   if (event.key === "ArrowDown" || event.key === "PageDown") {
-    stepCategory(1);
+    event.preventDefault();
+    stepSetInCurrentCategory(1);
   }
 
   if (event.key === "ArrowUp" || event.key === "PageUp") {
-    stepCategory(-1);
+    event.preventDefault();
+    stepSetInCurrentCategory(-1);
   }
 });
 
@@ -1662,21 +1515,20 @@ workView.addEventListener(
     if (workView.classList.contains("is-hidden")) return;
     if (Math.abs(event.deltaX) < 4 && Math.abs(event.deltaY) < 4) return;
 
-    event.preventDefault();
     const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
 
     if (isMobileLayout()) {
-      if (Math.abs(event.deltaY) >= Math.abs(event.deltaX)) {
-        stepCategory(delta > 0 ? -1 : 1);
-      } else {
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY) * 1.4) {
+        event.preventDefault();
         stepMobileUniverse(delta > 0 ? 1 : -1);
       }
       return;
     }
 
-    if (loopSheetFromEdge(delta)) return;
-
-    gallery.scrollBy({ left: delta, behavior: "auto" });
+    if (Math.abs(event.deltaX) > Math.abs(event.deltaY) * 1.4) {
+      event.preventDefault();
+      stepCategory(delta > 0 ? 1 : -1);
+    }
   },
   { passive: false }
 );
@@ -1717,10 +1569,8 @@ workView.addEventListener(
 
     if (Math.max(absX, absY) < threshold) return;
 
-    if (absY >= absX) {
-      stepCategory(dy > 0 ? -1 : 1);
-    } else {
-      stepMobileUniverse(dx > 0 ? -1 : 1);
+    if (absX >= absY * 1.25) {
+      stepCategory(dx > 0 ? -1 : 1);
     }
   },
   { passive: true }
